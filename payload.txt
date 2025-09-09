@@ -1,0 +1,50 @@
+{
+  "Records": [
+    {
+      "body": "{
+        \"source_customer_id\": \"CUST12345\",
+        \"customer_name\": \"John Doe\",
+        \"submission_id\": \"SUBM11111\",
+        \"program_name\": \"Homeowners\",
+        \"product_name\": \"Basic Coverage\",
+        \"submission_status\": \"Open\",
+        \"submission_type\": \"New Business\",
+        \"effective_date\": \"2025-01-01T00:00:00\",
+        \"expiration_date\": \"2025-12-31T23:59:59\",
+        \"proposal_detail\": [
+          {
+            \"proposal_id\": \"QUOTE9991\",
+            \"proposal_status\": \"In Progress\",
+            \"proposal_effective_date\": \"2025-01-01T00:00:00\",
+            \"proposal_expiration_date\": \"2025-12-31T23:59:59\"
+          },
+          {
+            \"proposal_id\": \"QUOTE9992\",
+            \"proposal_status\": \"Issued\",
+            \"proposal_effective_date\": \"2025-01-15T00:00:00\",
+            \"proposal_expiration_date\": \"2026-01-14T23:59:59\"
+          }
+        ]
+      }"
+    }
+  ]
+}
+
+
+
+{
+  "Records": [
+    {
+      "body": "{ \"Carrier\": \"CARR67890\", \"source_system\": \"as400\", \"carrier_name\": \"ABC Insurance\", \"carrier_type\": \"Health\" }"
+    }
+  ]
+}
+
+
+{
+  "Records": [
+    {
+      "body": "{ \"Customer\": \"CUST12345\", \"source_system\": \"as400\", \"customer_name\": \"John Doe\", \"customer_type\": \"Retail\" }"
+    }
+  ]
+}
