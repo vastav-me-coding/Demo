@@ -4,7 +4,7 @@ import time
 import requests
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
-from df_database_models.db_conn import get_rds_db_session, get_aumine_db_session
+from df_database_models.db_conn import get_rds_db_session, get_as400_db_session
 from df_database_models.models import Source_System, Line_Item, Line_Item_Type, Invoice, broker_portal_error_log, Customer, Customer_Contact
 from df_database_models.db_utils import  generate_uuid, convert_timestamps, generate_uuid, query_update_dict, get_record, call_sp
 from secrets_manager import get_secret
@@ -39,28 +39,17 @@ def call_session_engine(source_system=None, identifier=None):
             rds_db_nm=os.environ['RDS_REFINED_DB_NAME']
         else:
             rds_db_nm=os.environ['RDS_DB_NAME']
-            
 
         if source_system.lower() == '':#Type of system to enter is as400 has types
             #Calling the as400 engine to establish a connection to PAS Source System - AS400
 
-            as400_secret_name=os.environ[""]#enter secret manager id
+            as400_secret_name=os.environ["as400_aff"]#enter secret manager id
             as400_engine=get_as400_db_session(as400_secret_name, region_name)
 
         elif source_system.lower() == '':
             #Calling the as400 engine to establish a connection to PAS Source System - AS400
-            as400_secret_name=os.environ[""]#enter secret manager id
+            as400_secret_name=os.environ["as400_aum"]#enter secret manager id
             as400_engine=get_as400_db_session(as400_secret_name, region_name)
-            
-        # if source_system.lower() == 'aumine_aff':
-        #     #Calling the Aumine engine to establish a connection to PAS Source System - Aumine_AFF
-        #     aumine_secret_name=os.environ["AUMINE_AFF_SECRETS_MANAGER_ID"]
-        #     aumine_engine=get_aumine_db_session(aumine_secret_name, region_name)
-
-        # elif source_system.lower() == 'aumine_aum':
-        #     #Calling the Aumine engine to establish a connection to PAS Source System - Aumine_AUM
-        #     aumine_secret_name=os.environ["AUMINE_AUM_SECRETS_MANAGER_ID"]
-        #     aumine_engine=get_aumine_db_session(aumine_secret_name, region_name)
 
         #Calling the Db session Object to establish a connection to Data Foundation Schema
         session=get_rds_db_session(rds_secret_name,region_name,rds_host_nm,rds_db_nm)
@@ -69,14 +58,28 @@ def call_session_engine(source_system=None, identifier=None):
 
 # lookup into aumine aff: read data from lineitem table in Aumine 
 # lookup into aumine aff
-def lookup_as400(config=None, id=None):
+def lookup_as400(config=None, customer_id=None):
     source_system = config['source_system']
     if source_system:
         if source_system.lower() in []:# Add source system
             df = pd.read_sql(f"""
-                    #Add Query 
+                    SELECT DISTINCT CASt(NULL AS varchar(36)) AS df_customer_id,
+                    cu.CUSKEY AS source_customer_id,
+                    CAST(NULL AS varchar(36)) AS df_source_system_id,
+                    CAST(NULL AS varchar(36)) AS mdm_customer_id,
+                    CAST(NULL AS timestamp) AS created_date,
+                    CAST(NULL AS timestamp) AS modified_date
+                    FROM ADGDTAPR.NSOCVGP AS pol
+                    INNER JOIN adgdtapr.HCPCSTP AS cust ON pol.customer_no = cust.CUSTNO
+                    INNER JOIN adgdtapr.HCPCUSP cu ON cust.CSTKEY = cu.CUSKEY
+                    WHERE cu.CUSKEY = '{customer_id}'
                     """, con=as400_engine)
-        else:
+            # Add source system column name, mdm_customer_id, created date , modified date in place of these below null values
+#             CAST(NULL AS varchar(36)) AS df_source_system_id,  
+#             CAST(NULL AS varchar(36)) AS mdm_customer_id,
+#             CAST(NULL AS timestamp) AS created_date,
+#             CAST(NULL AS timestamp) AS modified_date
+# else:
             df=None
     else:
         df=None
@@ -109,7 +112,7 @@ async def consume_lambda(config=None):
                 global session, as400_engine
                 session, as400_engine = call_session_engine(source_system=source_system)
 
-                as400_customer_summary_dict = lookup_as400(config_dict, customer_id) #define dict for lookup data
+                as400_customer_summary_dict = lookup_as400(config_dict,  ) #define dict for lookup data
                 
                 if(as400_customer_summary_dict):
                     asyncio.create_task(log_msg(common_logger,log_messages=f'Initial {source_system} Customer Summary dict:',api_response=convert_timestamps(as400_customer_summary_dict)))
@@ -166,6 +169,5 @@ def handle(event, context):
     }
 
 if __name__ == '__main__':
-    handle({'Records': [{'body': '{"line_item":"1003093977"}'}]}, None)
-    # handle({'Records': [{'body': '[{ "source_policy_id": "2002569486", "parent_policy_id": "2002254485", "policy_type": "renewal"}]'}]}, None)
-    # handle({'Records': [{'body': '[{"source_policy_id":"2002573640"},{"source_policy_id":"2002573647"},{"source_policy_id":"2002573649"}]'}]}, None)
+    handle({"Records": [{"body": '{ "Customer": "CUST12345", "source_system": "as400" "customer_name": "John Doe", "customer_type": "Retail" }'}]}, None)
+    
