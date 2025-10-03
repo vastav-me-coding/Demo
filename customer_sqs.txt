@@ -1,0 +1,255 @@
+import os
+import json
+import time
+from sqlalchemy.exc import SQLAlchemyError
+from df_database_models.db_conn import get_rds_db_session, get_as400_db_session
+from df_database_models.models import Customer, Source_System
+from df_database_models.db_utils import (
+    generate_uuid,
+    convert_timestamps,
+    query_update_dict,
+    get_record,
+    multi_filter_get_record,
+    push_msg_to_sqs,
+    call_sp
+)
+from secrets_manager import get_secret
+from datetime import datetime
+import pandas as pd
+import asyncio
+from adf_pyutils.clm_wrapper import common_logger
+
+
+# ---------------- Environment Variables ---------------- #
+pnc_db = os.environ['RDS_DB_NAME']
+ref_db = os.environ['RDS_REF_DB_NAME']
+mdm_raw_db = os.environ['RDS_RAW_DB_NAME']
+mdm_refined_db = os.environ['RDS_REFINED_DB_NAME']
+
+
+# ---------------- Utility Functions ---------------- #
+async def log_msg(func, **kwargs):
+    await asyncio.to_thread(func, **kwargs)
+
+
+def msg_to_sqs(source_system=None, identifier=None, id=None):
+    """Push customer-related messages to appropriate SQS queue"""
+    if identifier:
+        Json_payload = {}
+        sqs_queue_prefix = os.environ["SQS_APP_PREFIX"]
+
+        if identifier == 'Customer':
+            sqs_queue_suffix = os.environ["SQS_CUSTOMER_SUFFIX"]
+            Json_payload["source_customer_id"] = id
+
+        elif identifier == 'Customer_Contact':
+            sqs_queue_suffix = os.environ["SQS_CUSTOMERCONTACT_SUFFIX"]
+            Json_payload["source_customer_contact_id"] = id
+
+        elif identifier == 'Mdm_Customer_Sub_Xref':
+            sqs_queue_suffix = os.environ["SQS_CUSTOMER_SUB_XREF_SUFFIX"]
+            Json_payload = id
+
+        Json_payload['source_system'] = source_system
+        queue_name = sqs_queue_prefix + '-' + sqs_queue_suffix
+
+        try:
+            response = push_msg_to_sqs(queue_name, Json_payload)
+            asyncio.create_task(
+                log_msg(common_logger, log_messages=f'-- Push message to Queue: {queue_name} success -- {response}')
+            )
+        except Exception as e:
+            asyncio.create_task(
+                log_msg(common_logger, log_messages=f'-- Push message to Queue: {queue_name} failed -- {e}')
+            )
+
+
+def init_sp(source_system=None, identifier=None, id=None):
+    """Call producer API for customer sync"""
+    if identifier:
+        sqs_producer_secret = json.loads(
+            get_secret(secret_name=os.environ["SQS_PRODUCER_SECRET_ID"], region_name=os.environ["AWS_REGION"])
+        )
+        sqs_producer_access_key = sqs_producer_secret["access_key"]
+
+        json_payload = {}
+        if identifier == 'Customer':
+            sqs_producer_url = os.environ["SQS_MDM_CUSTOMER_URL"]
+            json_payload["source_customer_id"] = id
+        elif identifier == 'Customer_Contact':
+            sqs_producer_url = os.environ["SQS_MDM_CUSTOMER_CONTACT_URL"]
+            json_payload["source_customer_contact_id"] = id
+        elif identifier == 'Mdm_Customer_Sub_Xref':
+            sqs_producer_url = os.environ["SQS_MDM_CUSTOMER_SUB_XREF_URL"]
+            json_payload = id
+
+        json_payload['source_system'] = source_system
+
+        try:
+            response = call_sp(sqs_producer_url, sqs_producer_access_key, json_payload)
+            if str(response) == "200":
+                asyncio.create_task(
+                    log_msg(common_logger, log_messages=f'-- Producer API Success: {sqs_producer_url} -- {response}')
+                )
+        except Exception as e:
+            asyncio.create_task(
+                log_msg(common_logger, log_messages=f'-- Producer API Failed: {sqs_producer_url} -- {e}')
+            )
+
+
+def call_session_engine(source_system=None, database_name=None):
+    """Get DB sessions (RDS / AS400)"""
+
+    rds_secret_name = os.environ["RDS_SECRETS_MANAGER_ID"]
+    region_name = os.environ["AWS_REGION"]
+    rds_host_nm = os.environ['RDS_HOST']
+
+    if database_name == 'ref_data':
+        rds_db_nm = os.environ['RDS_REF_DB_NAME']
+    elif database_name == 'mdm_raw':
+        rds_db_nm = os.environ['RDS_RAW_DB_NAME']
+    elif database_name == 'mdm_refined':
+        rds_db_nm = os.environ['RDS_REFINED_DB_NAME']
+    else:
+        rds_db_nm = os.environ['RDS_DB_NAME']
+
+    if source_system and source_system.lower() == 'as400_aff':
+        as400_secret_name = os.environ["AS400_AFF_SECRETS_MANAGER_ID"]
+        return get_as400_db_session(as400_secret_name, region_name)
+
+    elif source_system and source_system.lower() == 'as400_kkins':
+        as400_secret_name = os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+        return get_as400_db_session(as400_secret_name, region_name)
+
+    # Default: RDS session
+    return get_rds_db_session(rds_secret_name, region_name, rds_host_nm, rds_db_nm)
+
+
+# ---------------- Global Sessions ---------------- #
+session = call_session_engine(database_name=pnc_db)
+as400_engine_aff = call_session_engine(source_system='as400_aff')
+as400_engine_kkins = call_session_engine(source_system='as400_kkins')
+
+
+# ---------------- Lookup ---------------- #
+def lookup_as400(config=None, customer_id=None):
+    """Lookup customer data from AS400"""
+    source_system = config['source_system']
+    df = None
+
+    if source_system.lower() == 'as400_affprd':
+        df = pd.read_sql(f"""
+            SELECT CUSKEY AS source_customer_id,
+                   CUSTNM AS customer_name,
+                   'AS400_AFFPRD' AS source_system
+            FROM ADGDTAPR.HCPCUSP
+            WHERE CUSKEY = '{customer_id}'
+        """, con=as400_engine_aff)
+
+    elif source_system.lower() == 'as400_kkins':
+        df = pd.read_sql(f"""
+            SELECT CSTKEY AS source_customer_id,
+                   CUSTNM AS customer_name,
+                   'AS400_KKINS' AS source_system
+            FROM KKDATAPR.CUSTOMER
+            WHERE CSTKEY = '{customer_id}'
+        """, con=as400_engine_kkins)
+
+    if df is not None and len(df) > 0:
+        return df.to_dict('records')[0]
+    return None
+
+
+# ---------------- Main Consumer ---------------- #
+async def consume_lambda(config=None):
+    asyncio.create_task(log_msg(common_logger, log_messages='consume lambda invoked'))
+    now = datetime.now()
+    start_timestamp = datetime.timestamp(now)
+
+    try:
+        config_dicts = config if isinstance(config, dict) else json.loads(str(config))
+        if not isinstance(config_dicts, list):
+            config_dicts = [config_dicts]
+
+        for config_dict in config_dicts:
+            customer_id = config_dict['Customer']
+            source_system = config_dict['source_system'].lower()
+
+            if not customer_id:
+                continue
+
+            # Select AS400 engine
+            if source_system == 'as400_aff':
+                as400_engine = as400_engine_aff
+            elif source_system == 'as400_kkins':
+                as400_engine = as400_engine_kkins
+            else:
+                as400_engine = None
+
+            # Lookup
+            as400_customer_summary_dict = lookup_as400(config_dict, customer_id)
+
+            if as400_customer_summary_dict:
+                asyncio.create_task(
+                    log_msg(common_logger, log_messages=f'Initial {source_system} Customer dict:',
+                            api_response=convert_timestamps(as400_customer_summary_dict))
+                )
+
+                # Source System mapping
+                source_system_record = (
+                    query.first()
+                    if (query := multi_filter_get_record(session, model=Source_System,
+                                                         source_system=source_system)) is not None else None
+                )
+                if source_system_record:
+                    as400_customer_summary_dict['df_source_system_id'] = source_system_record.df_source_system_id
+
+                # Customer record check
+                source_customer_id = as400_customer_summary_dict.get("source_customer_id")
+                df_source_system_id = as400_customer_summary_dict.get("df_source_system_id")
+
+                customer_record = multi_filter_get_record(
+                    session, model=Customer,
+                    source_customer_id=source_customer_id,
+                    source_system_id=df_source_system_id
+                )
+                self_customer = customer_record.first() if customer_record is not None else None
+
+                if self_customer is None:
+                    as400_customer_summary_dict['df_customer_id'] = generate_uuid(
+                        str(source_customer_id or '') + str(df_source_system_id or '')
+                    )
+                    session.add(Customer.from_dict(cls=Customer, d=as400_customer_summary_dict))
+                    session.commit()
+                    asyncio.create_task(log_msg(common_logger, log_messages=f'Inserted Customer {customer_id}'))
+                else:
+                    as400_customer_summary_dict['df_customer_id'] = self_customer.df_customer_id
+                    customer_record.update(query_update_dict(obj=Customer, dict=as400_customer_summary_dict))
+                    session.commit()
+                    asyncio.create_task(log_msg(common_logger, log_messages=f'Updated Customer {customer_id}'))
+
+            else:
+                error_log = {"customer_id": customer_id, "error_message": "No record found after lookup"}
+                asyncio.create_task(log_msg(common_logger, log_messages='Lookup failed', api_response=error_log))
+
+        end_timestamp = datetime.timestamp(datetime.now())
+        asyncio.create_task(log_msg(common_logger, log_messages=f'Execution Time: {end_timestamp - start_timestamp}s'))
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        asyncio.create_task(log_msg(common_logger, log_messages='DB Error', api_response=str(e)))
+        raise e
+
+
+# ---------------- Lambda Handler ---------------- #
+def handle(event, context):
+    start_time = time.time()
+    for record in event['Records']:
+        payload = record["body"]
+        asyncio.run(consume_lambda(config=payload))
+    end_time = time.time()
+    return {"execution_time_sec": end_time - start_time}
+
+
+if __name__ == '__main__':
+    handle({"Records": [{"body": '{ "Customer": "CUST12345", "source_system": "as400_aff"}'}]}, None)
