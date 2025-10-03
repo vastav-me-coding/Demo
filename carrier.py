@@ -4,80 +4,168 @@ import time
 import requests
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
-from df_database_models.db_conn import get_rds_db_session, get_aumine_db_session
-from df_database_models.models import Source_System, Line_Item, Line_Item_Type, Invoice, broker_portal_error_log, Customer, Customer_Contact, Carrier
-from df_database_models.db_utils import  generate_uuid, convert_timestamps, generate_uuid, query_update_dict, get_record, call_sp
+from df_database_models.db_conn import get_rds_db_session, get_as400_db_session
+from df_database_models.models import Agency_Contact_Raw as AgencyContact, Source_System_Raw as Source_System, Carrier
+from df_database_models.db_utils import  generate_uuid, convert_timestamps, generate_uuid, query_update_dict, get_record, multi_filter_get_record, push_msg_to_sqs, call_sp
 from secrets_manager import get_secret
 from datetime import datetime
 import pandas as pd
 import asyncio
 from adf_pyutils.clm_wrapper import common_logger
 
-print("Class job is executing")
+
+# logger = logging.getLogger()
+# logger.setLevel(logging.INFO)
+
+pnc_db = os.environ['RDS_DB_NAME']
+ref_db = os.environ['RDS_REF_DB_NAME']
+mdm_raw_db = os.environ['RDS_RAW_DB_NAME']
+mdm_refined_db = os.environ['RDS_REFINED_DB_NAME']
 
 ## Fetch SQS producer Parameters from aws secret manager
-# sqs_producer_secret = json.loads(get_secret(
-#          secret_name=os.environ["SQS_PRODUCER_SECRET_ID"], region_name=os.environ["AWS_REGION"]))
-# sqs_producer_access_key = sqs_producer_secret["access_key"]
-# sqs_policy_update_url = os.environ["SQS_POLICY_UPDATE_URL"]
 
 async def log_msg(func,**kwargs):
     await asyncio.to_thread(func,**kwargs)
 
-def call_session_engine(source_system=None, identifier=None):
+def msg_to_sqs(source_system=None, identifier=None, id=None):
+    if identifier:
+        Json_payload = {}
+        sqs_queue_prefix = os.environ["SQS_APP_PREFIX"]
 
-    if source_system:
-        rds_secret_name=os.environ["RDS_SECRETS_MANAGER_ID"]
-        region_name=os.environ["AWS_REGION"]
-        rds_host_nm=os.environ['RDS_HOST']
+        if identifier ==  'Agency':            
+            sqs_queue_suffix = os.environ["SQS_AGENCY_SUFFIX"]
+            Json_payload["source_agency_id"] = id
 
-        if identifier == 'ref':
-            rds_db_nm=os.environ['RDS_REF_DB_NAME']
-        elif identifier == 'raw':
-            rds_db_nm=os.environ['RDS_RAW_DB_NAME']
-        elif identifier == 'refined':
-            rds_db_nm=os.environ['RDS_REFINED_DB_NAME']
-        else:
-            rds_db_nm=os.environ['RDS_DB_NAME']
+        elif identifier ==  'Agency_Contact':
+            sqs_queue_suffix = os.environ["SQS_AGENCYCONTACT_SUFFIX"]
+            Json_payload["source_agency_contact_id"] = id
+
+        elif identifier ==  'Customer':
+            sqs_queue_suffix = os.environ["SQS_CUSTOMER_SUFFIX"]
+            Json_payload["source_customer_id"] = id
+
+        elif identifier ==  'Customer_Contact':
+            sqs_queue_suffix = os.environ["SQS_CUSTOMERCONTACT_SUFFIX"]
+            Json_payload["source_customer_contact_id"] = id
+
+        elif identifier ==  'Mdm_Customer_Sub_Xref':
+            sqs_queue_suffix = os.environ["SQS_CUSTOMER_SUB_XREF_SUFFIX"]
+            Json_payload = id
+
+        Json_payload['source_system'] = source_system
+        queue_name = sqs_queue_prefix+'-'+sqs_queue_suffix
+
+        try:
+            response = push_msg_to_sqs(queue_name, Json_payload)
+            asyncio.create_task(log_msg(common_logger,log_messages=f'-- Push message to Queue: {queue_name} is success with response code -- {response}'))
+
+        except Exception as e:
+            asyncio.create_task(log_msg(common_logger,log_messages=f'-- Push message to Queue: {queue_name} is failed with response code -- {response} -- {e}'))
+
+def init_sp(source_system=None, identifier=None, id=None):
+    if identifier:
+        sqs_producer_secret = json.loads(get_secret(
+                secret_name=os.environ["SQS_PRODUCER_SECRET_ID"], region_name=os.environ["AWS_REGION"]))
+        sqs_producer_access_key = sqs_producer_secret["access_key"]
+
+        json_payload = {}
+
+        if identifier ==  'Agency':
+            sqs_producer_url = os.environ["SQS_MDM_AGENCY_URL"]
+            json_payload["source_agency_id"] = id
+
+        elif identifier ==  'Agency_Contact':
+            sqs_producer_url = os.environ["SQS_MDM_AGENCY_CONTACT_URL"]
+            json_payload["source_agency_contact_id"] = id
+
+        elif identifier ==  'Customer':
+            sqs_producer_url = os.environ["SQS_MDM_CUSTOMER_URL"]
+            json_payload["source_customer_id"] = id
+
+        elif identifier ==  'Customer_Contact':
+            sqs_producer_url = os.environ["SQS_MDM_CUSTOMER_CONTACT_URL"]
+            json_payload["source_customer_contact_id"] = id
+
+        elif identifier ==  'Mdm_Customer_Sub_Xref':
+            sqs_producer_url = os.environ["SQS_MDM_CUSTOMER_SUB_XREF_URL"]
+            json_payload = id
             
 
-        if source_system.lower() == '':#Type of system to enter is as400 has types
-            #Calling the as400 engine to establish a connection to PAS Source System - AS400
+        json_payload['source_system'] = source_system
+        try:
+            response = call_sp(sqs_producer_url,sqs_producer_access_key, json_payload)
+            if str(response) == 200:
+                asyncio.create_task(log_msg(common_logger,log_messages=f'-- Calling to Producer API URL: {sqs_producer_url} was success -- {response}'))
 
-            as400_secret_name=os.environ[""]#enter secret manager id
-            as400_engine=get_as400_db_session(as400_secret_name, region_name)
+        except Exception as e:
+            asyncio.create_task(log_msg(common_logger,log_messages=f'-- Calling to Producer API URL : {sqs_producer_url} was failed -- {e}'))
 
-        elif source_system.lower() == '':
-            #Calling the as400 engine to establish a connection to PAS Source System - AS400
-            as400_secret_name=os.environ[""]#enter secret manager id
-            as400_engine=get_as400_db_session(as400_secret_name, region_name)
-            
-        # if source_system.lower() == 'aumine_aff':
-        #     #Calling the Aumine engine to establish a connection to PAS Source System - Aumine_AFF
-        #     aumine_secret_name=os.environ["AUMINE_AFF_SECRETS_MANAGER_ID"]
-        #     aumine_engine=get_aumine_db_session(aumine_secret_name, region_name)
+def call_session_engine(source_system=None, database_name=None):
 
-        # elif source_system.lower() == 'aumine_aum':
-        #     #Calling the Aumine engine to establish a connection to PAS Source System - Aumine_AUM
-        #     aumine_secret_name=os.environ["AUMINE_AUM_SECRETS_MANAGER_ID"]
-        #     aumine_engine=get_aumine_db_session(aumine_secret_name, region_name)
+    rds_secret_name=os.environ["RDS_SECRETS_MANAGER_ID"]
+    region_name=os.environ["AWS_REGION"]
+    rds_host_nm=os.environ['RDS_HOST']
 
+    if database_name == 'ref_data':
+        rds_db_nm=os.environ['RDS_REF_DB_NAME']
+    elif database_name == 'mdm_raw':
+        rds_db_nm=os.environ['RDS_RAW_DB_NAME']
+    elif database_name == 'mdm_refined':
+        rds_db_nm=os.environ['RDS_REFINED_DB_NAME']
+    else:
+        rds_db_nm=os.environ['RDS_DB_NAME']
+
+
+    if source_system.lower() == 'as400_aff':
+        #Calling the as400 engine to establish a connection to PAS Source System - as400_AFF
+        as400_secret_name=os.environ["AS400_AFF_SECRETS_MANAGER_ID"]
+        as400_engine=get_as400_db_session(as400_secret_name, region_name)
+        return as400_engine
+
+    elif source_system.lower() == 'as400_kkins':
+        #Calling the as400 engine to establish a connection to PAS Source System - as400_AUM
+        as400_secret_name=os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+        as400_engine=get_as400_db_session(as400_secret_name, region_name)
+        return as400_engine
+
+    if database_name:
         #Calling the Db session Object to establish a connection to Data Foundation Schema
         session=get_rds_db_session(rds_secret_name,region_name,rds_host_nm,rds_db_nm)
 
-        return session, as400_engine
+        return session
+    
+session = call_session_engine(database_name=pnc_db)
+as400_engine_aff = call_session_engine(source_system='as400_aff')
+as400_engine_kkins = call_session_engine(source_system='as400_kkins')
 
-# lookup into aumine aff: read data from lineitem table in Aumine 
-# lookup into aumine aff
+# lookup into as400 aff
 def lookup_as400(config=None, id=None):
+
     source_system = config['source_system']
     if source_system:
-        if source_system.lower() in []:# Add source system
-            df = pd.read_sql(f"""
-                    #Add Query 
+        if(source_system.lower() == 'as400_affprd'):
+                df = pd.read_sql(f"""
+                    SELECT MCCR_COMPANY_CODE AS source_carrier_id
+                    ,COFL01 AS carrier_name
+                    ,'AS400_AFFPRD' AS source_system
+                    FROM ADGDTAPR.NSPSRCP
+                    WHERE MCCR_COMPANY_CODE = '{id}'
                     """, con=as400_engine)
-        else:
-            df=None
+
+        elif(source_system.lower() == 'as400_attorney'):
+                df = pd.read_sql(f"""
+                    SELECT CNVPRD AS source_carrier_id,CNVDSC AS carrier_name,'AS400_AFFPRD' as source_system
+                    FROM LAWDTAPR.ATACNVP;
+                    WHERE CNVPRD = '{id}'
+                    """, con=as400_engine)
+
+        elif(source_system.lower() == 'as400_kkins'):
+                df = pd.read_sql(f"""
+                    SELECT DISTINCT CONCAT(KKPREF, CONCAT('-', KKCODE)) AS source_carrier_id
+                    ,KKDESC AS carrier_name
+                    FROM USERLIB.KKMISC WHERE KKPREF = 'PCM'
+                    AND CONCAT(KKPREF, '-', KKCODE) = '{id}'
+                    """, con=as400_engine)
     else:
         df=None
 
@@ -86,7 +174,7 @@ def lookup_as400(config=None, id=None):
     else:
         return None
 
-# Main function to process incoming configuration data
+
 async def consume_lambda(config=None):
     asyncio.create_task(log_msg(common_logger,log_messages='consume lambda function invoking'))
     now = datetime.now()
@@ -101,13 +189,18 @@ async def consume_lambda(config=None):
         else:
             config_dicts = [config_dicts] # Ensure config_dicts is a list
         for config_dict in config_dicts:
-            carrier_id = config_dict['Carrier'] # Get the carrier from config data 
+            carrier_id = config_dict['source_carrier_id'] # Get the carrier from config data 
             source_system = config_dict['source_system'].lower()
             if(id):
                 fk_flag = 1
-                print("Calling call_session_engine Function")
-                global session, as400_engine
-                session, as400_engine = call_session_engine(source_system=source_system)
+                global as400_engine
+                # source_system = config['source_system'].lower()
+                if source_system == 'as400_aff':
+                    session = session
+                    as400_engine = as400_engine_aff
+                elif source_system == 'as400_kkins':
+                    session = session
+                    as400_engine = as400_engine_kkins
 
                 as400_carrier_summary_dict = lookup_as400(config_dict, carrier_id) #define dict for lookup data
                 
@@ -115,36 +208,44 @@ async def consume_lambda(config=None):
                     asyncio.create_task(log_msg(common_logger,log_messages=f'Initial {source_system} Carrier Summary dict:',api_response=convert_timestamps(as400_carrier_summary_dict)))
 
                     #Fetch Source SyStem Id from Data Foundation
-                    # source_system = as400_carrier_summary_dict.get("source_system")
-                    source_system_record = (query.first() if (query := get_record(session,model=Source_System,column_name='source_system',value=source_system)) is not None else None)
+                    source_system = as400_carrier_summary_dict.get("source_system")
+                    source_system_record = (query.first() if (query := multi_filter_get_record(session,model=Source_System,source_system=source_system)) is not None else None)
+
                     if source_system_record:
                         as400_carrier_summary_dict['df_source_system_id'] = source_system_record.df_source_system_id
 
-                    #Fetch LineItem Type Id from Data Foundation
-                    # line_item_type_record = as400_carrier_summary_dict.get("line_item_type")
-                    carrier_record = (query.first() if (query := get_record(session,model=Line_Item_Type,column_name='source_carrier_id',value = carrier_id)) is not None else None)
+                    source_carrier_id = as400_carrier_summary_dict.get("source_carrier_id")
+                    df_source_system_id = as400_carrier_summary_dict.get("df_source_system_id")
+
+                    carrier_record = multi_filter_get_record(session,model = Carrier, source_carrier_id = source_carrier_id, source_system_id = df_source_system_id)
                     self_carrier = (carrier_record.first() if carrier_record is not None else None)
-                    
+
+                    asyncio.create_task(log_msg(common_logger,log_messages=f'self agency - {self_carrier}'))
+                    asyncio.create_task(log_msg(common_logger,log_messages=f'Changed {source_system} Agency Contact Summary dict:',api_response=convert_timestamps(as400_carrier_summary_dict)))
+
                     if self_carrier is None:
-                        asyncio.create_task(log_msg(common_logger,log_messages='Customer does not exist in Data Foundation'))
+                        asyncio.create_task(log_msg(common_logger,log_messages='Carrier does not exist in Data Foundation'))
                         as400_carrier_summary_dict['df_carrier_id'] = generate_uuid(
                             str(as400_carrier_summary_dict['source_carrier_id'] or '') + 
-                            str(as400_carrier_summary_dict['df_source_system_id'] or ''), 
+                            str(as400_carrier_summary_dict['df_source_system_id'] or '')
                         )
+                        asyncio.create_task(log_msg(common_logger,log_messages=f'Insert {source_system} Carrier Summary dict: ',api_response=convert_timestamps(as400_carrier_summary_dict)))
                         session.add(Carrier.from_dict(cls = Carrier, d = as400_carrier_summary_dict))
                         session.commit()
-                        fk_flag = 0
                         asyncio.create_task(log_msg(common_logger,log_messages='Inserted carrier {carrier_id}'))
                     else:
+                        asyncio.create_task(log_msg(common_logger,log_messages='carrier exists in Data foundation schema'))
+                        as400_carrier_summary_dict['df_carrier_id'] = self_carrier.df_carrier_id
                         asyncio.create_task(log_msg(common_logger,log_messages='Carrier exists in Data Foundation'))
                         carrier_record.update(query_update_dict( obj = Carrier, dict = as400_carrier_summary_dict))
+                        asyncio.create_task(log_msg(common_logger,log_messages=f'Updated in DB @ {now} | {datetime.timestamp(now)}'))
                         session.commit()
-
+                else:
                     error_log = {
                         "df_line_item_id" : id,
                         "error_message" : "No record found after lookup" 
                     }
-                    asyncio.create_task(log_msg(common_logger,log_messages='No record found after lookup'))
+                    asyncio.create_task(log_msg(common_logger, log_messages=f"No record found for LineItem {carrier_id}", api_response=error_log))        
         now = datetime.now()
         end_timestamp = datetime.timestamp(now)
         asyncio.create_task(log_msg(common_logger,log_messages=f'execution_time: {end_timestamp} - {start_timestamp}'))
@@ -153,19 +254,22 @@ async def consume_lambda(config=None):
         session.rollback()
         raise e
 
-
 def handle(event, context):
     start_time = time.time()
+
     print("Handle function is called")
     for record in event['Records']:
         payload = record["body"]
         asyncio.run(consume_lambda(config=payload))
+
     end_time = time.time()
+
     return {
         "execution_time_sec": end_time - start_time 
     }
 
+
 if __name__ == '__main__':
-    handle({'Records': [{'body': '{"line_item":"1003093977"}'}]}, None)
-    # handle({'Records': [{'body': '[{ "source_policy_id": "2002569486", "parent_policy_id": "2002254485", "policy_type": "renewal"}]'}]}, None)
-    # handle({'Records': [{'body': '[{"source_policy_id":"2002573640"},{"source_policy_id":"2002573647"},{"source_policy_id":"2002573649"}]'}]}, None)
+    handle({'Records': [{'body': '{"source_agency_contact_id":"1003093977"}'}]}, None)
+    # handle({'Records': [{'body': '[{ "source_agency_id": "2002569486", "parent_agency_id": "2002254485", "agency_type": "renewal"}]'}]}, None)
+    # handle({'Records': [{'body': '[{"source_agency_id":"2002573640"},{"source_agency_id":"2002573647"},{"source_agency_id":"2002573649"}]'}]}, None)
