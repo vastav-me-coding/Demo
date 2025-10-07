@@ -1,0 +1,69 @@
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+2025-10-07 12:51:06.401 [info] > git show --textconv :src/handler.py [12670ms]
+2025-10-07 12:51:06.404 [info] > git config --get commit.template [13388ms]
+2025-10-07 12:51:06.405 [info] > git for-each-ref --format=%(refname)%00%(upstream:short)%00%(objectname)%00%(upstream:track)%00%(upstream:remotename)%00%(upstream:remoteref) --ignore-case refs/heads/main refs/remotes/main [13036ms]
+2025-10-07 12:51:06.405 [warning] [Git][getBranch] No such branch: main
+2025-10-07 12:51:08.870 [info] > git show --textconv HEAD:src/handler.py [14454ms]
+2025-10-07 12:51:08.871 [info] > git ls-files --stage -- src/handler.py [4423ms]
+2025-10-07 12:51:09.197 [warning] [GitFileSystemProvider][readFile] File not found - git:/c%3A/Users/A0885080/Downloads/Data%20and%20analytics%20team/DF_SQS_AS400_AFF_KKINS_CustomerConsumer/df_sqs_as400_aff_kkins_customerconsumer/src/handler.py.git?%7B%22path%22%3A%22c%3A%5C%5CUsers%5C%5CA0885080%5C%5CDownloads%5C%5CData%20and%20analytics%20team%5C%5CDF_SQS_AS400_AFF_KKINS_CustomerConsumer%5C%5Cdf_sqs_as400_aff_kkins_customerconsumer%5C%5Csrc%5C%5Chandler.py%22%2C%22ref%22%3A%22HEAD%22%7D
+2025-10-07 12:51:09.879 [info] > git ls-tree -l HEAD -- src/handler.py [3491ms]
+2025-10-07 12:51:09.883 [info] fatal: Not a valid object name HEAD
+2025-10-07 12:51:09.884 [warning] [GitFileSystemProvider][stat] File not found - git:/c%3A/Users/A0885080/Downloads/Data%20and%20analytics%20team/DF_SQS_AS400_AFF_KKINS_CustomerConsumer/df_sqs_as400_aff_kkins_customerconsumer/src/handler.py.git?%7B%22path%22%3A%22c%3A%5C%5CUsers%5C%5CA0885080%5C%5CDownloads%5C%5CData%20and%20analytics%20team%5C%5CDF_SQS_AS400_AFF_KKINS_CustomerConsumer%5C%5Cdf_sqs_as400_aff_kkins_customerconsumer%5C%5Csrc%5C%5Chandler.py%22%2C%22ref%22%3A%22HEAD%22%7D
+2025-10-07 12:51:10.282 [info] > git status -z -uall [3057ms]
+2025-10-07 12:51:13.789 [info] > git for-each-ref --sort -committerdate --format %(refname) %(objectname) %(*objectname) [5907ms]
+2025-10-07 12:51:14.310 [info] > git cat-file -s 0901bf9c9ec8b85b6420b28403edbf8f2a09b15b [5115ms]
+2025-10-07 12:51:16.893 [info] > git -c user.useConfigOnly=true commit --quiet --allow-empty-message --file - [8025ms]
+2025-10-07 12:51:18.861 [info] > git config --get commit.template [1431ms]
+2025-10-07 12:51:19.292 [info] > git ls-files --stage -- src/handler.py [1480ms]
+2025-10-07 12:51:19.430 [info] > git config --get --local branch.main.merge [2586ms]
+2025-10-07 12:51:20.081 [info] > git config --get commit.template [943ms]
+2025-10-07 12:51:20.473 [info] > git for-each-ref --format=%(refname)%00%(upstream:short)%00%(objectname)%00%(upstream:track)%00%(upstream:remotename)%00%(upstream:remoteref) --ignore-case refs/heads/main refs/remotes/main [1182ms]
+2025-10-07 12:51:20.636 [info] > git cat-file -s 0901bf9c9ec8b85b6420b28403edbf8f2a09b15b [1205ms]
+2025-10-07 12:51:21.630 [info] > git status -z -uall [1065ms]
+2025-10-07 12:51:21.937 [info] > git show --textconv :src/handler.py [1256ms]
+2025-10-07 12:51:22.062 [info] > git for-each-ref --sort -committerdate --format %(refname) %(objectname) %(*objectname) [1428ms]
+2025-10-07 12:51:23.625 [info] > git blame --root --incremental 5cfaaa8cbaf17696f47b18296f1278652a21b4e0 -- src/handler.py [1563ms]
+2025-10-07 12:51:24.382 [info] > git log --format=%H%n%aN%n%aE%n%at%n%ct%n%P%n%D%n%B -z --shortstat --diff-merges=first-parent -n50 --skip=0 --topo-order --decorate=full --stdin [2081ms]
+2025-10-07 12:51:24.672 [info] > git for-each-ref --format=%(refname)%00%(upstream:short)%00%(objectname)%00%(upstream:track)%00%(upstream:remotename)%00%(upstream:remoteref) --ignore-case refs/heads/main refs/remotes/main [2007ms]
+2025-10-07 12:51:24.673 [info] > git config --get commit.template [2140ms]
+2025-10-07 12:51:25.914 [info] > git status -z -uall [1091ms]
+2025-10-07 12:51:26.002 [info] > git for-each-ref --sort -committerdate --format %(refname) %(objectname) %(*objectname) [1064ms]
+2025-10-07 12:51:48.401 [info] > git config --get --local branch.main.merge [1536ms]
+2025-10-07 12:52:06.311 [info] > git push -u origin main [15591ms]
+2025-10-07 12:52:06.311 [info] git: 'credential-manager-core' is not a git command. See 'git --help'.
+git: 'credential-manager-core' is not a git command. See 'git --help'.
+git: 'credential-manager-core' is not a git command. See 'git --help'.
+git: 'credential-manager-core' is not a git command. See 'git --help'.
+remote: GitLab:         
+remote: A default branch (e.g. main) does not yet exist for aon/affinity/ods/df_sqs_as400_aff_kkins_customerconsumer        
+remote: Ask a project Owner or Maintainer to create a default branch:        
+remote: 
+remote:   https://gitlab.com/aon/affinity/ods/df_sqs_as400_aff_kkins_customerconsumer/-/project_members        
+remote: 
+To https://gitlab.com/aon/affinity/ods/df_sqs_as400_aff_kkins_customerconsumer.git
+ ! [remote rejected] main -> main (pre-receive hook declined)
+error: failed to push some refs to 'https://gitlab.com/aon/affinity/ods/df_sqs_as400_aff_kkins_customerconsumer.git'
+2025-10-07 12:52:07.131 [info] > git for-each-ref --format=%(refname)%00%(upstream:short)%00%(objectname)%00%(upstream:track)%00%(upstream:remotename)%00%(upstream:remoteref) --ignore-case refs/heads/main refs/remotes/main [722ms]
+2025-10-07 12:52:07.156 [info] > git config --get commit.template [802ms]
+2025-10-07 12:52:07.949 [info] > git for-each-ref --sort -committerdate --format %(refname) %(objectname) %(*objectname) [722ms]
+2025-10-07 12:52:07.977 [info] > git status -z -uall [784ms]
+2025-10-07 12:52:16.913 [info] > git config --get --local branch.main.merge [377ms]
+2025-10-07 12:52:47.199 [info] > git config --get --local branch.main.merge [643ms]
+2025-10-07 12:53:01.042 [info] > git push -u origin main [12114ms]
+2025-10-07 12:53:01.042 [info] git: 'credential-manager-core' is not a git command. See 'git --help'.
+git: 'credential-manager-core' is not a git command. See 'git --help'.
+git: 'credential-manager-core' is not a git command. See 'git --help'.
+git: 'credential-manager-core' is not a git command. See 'git --help'.
+remote: GitLab:         
+remote: A default branch (e.g. main) does not yet exist for aon/affinity/ods/df_sqs_as400_aff_kkins_customerconsumer        
+remote: Ask a project Owner or Maintainer to create a default branch:        
+remote: 
+remote:   https://gitlab.com/aon/affinity/ods/df_sqs_as400_aff_kkins_customerconsumer/-/project_members        
+remote: 
+To https://gitlab.com/aon/affinity/ods/df_sqs_as400_aff_kkins_customerconsumer.git
+ ! [remote rejected] main -> main (pre-receive hook declined)
+error: failed to push some refs to 'https://gitlab.com/aon/affinity/ods/df_sqs_as400_aff_kkins_customerconsumer.git'
+2025-10-07 12:53:02.874 [info] > git config --get commit.template [1742ms]
+2025-10-07 12:53:03.203 [info] > git for-each-ref --format=%(refname)%00%(upstream:short)%00%(objectname)%00%(upstream:track)%00%(upstream:remotename)%00%(upstream:remoteref) --ignore-case refs/heads/main refs/remotes/main [1875ms]
+2025-10-07 12:53:05.161 [info] > git status -z -uall [1788ms]
+2025-10-07 12:53:05.269 [info] > git for-each-ref --sort -committerdate --format %(refname) %(objectname) %(*objectname) [1576ms]
