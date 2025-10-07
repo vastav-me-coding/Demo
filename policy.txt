@@ -1,0 +1,311 @@
+import os
+import json
+import time
+import requests
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
+from df_database_models.db_conn import get_rds_db_session, get_as400_db_session
+from df_database_models.models import (
+    Policy,
+    PolicyStatus,
+    AgencyContact,
+    Agency,
+    Product,
+    Customer,
+    Source_System
+)
+from df_database_models.db_utils import generate_uuid, convert_timestamps, query_update_dict, get_record, call_sp
+from secrets_manager import get_secret
+from datetime import datetime
+import pandas as pd
+import asyncio
+from adf_pyutils.clm_wrapper import common_logger
+
+print("Policy ingestion job is executing")
+
+def init_sp(source_transaction_id=None):
+    if source_transaction_id:
+        sqs_producer_secret = json.loads(get_secret(
+                secret_name=os.environ["SQS_PRODUCER_SECRET_ID"], region_name=os.environ["AWS_REGION"]))
+        sqs_producer_access_key = sqs_producer_secret["access_key"]
+        sqs_policy_update_url = os.environ["SQS_POLICY_UPDATE_URL"]
+        call_sp(sqs_policy_update_url, sqs_producer_access_key, source_transaction_id)
+
+async def log_msg(func, **kwargs):
+    await asyncio.to_thread(func, **kwargs)
+
+def call_session_engine(source_system=None, database_name=None):
+    """Return (rds_session, as400_engine) based on source_system."""
+    if source_system:
+        rds_secret_name = os.environ["RDS_SECRETS_MANAGER_ID"]
+        region_name = os.environ["AWS_REGION"]
+        rds_host_nm = os.environ['RDS_HOST']
+
+        if database_name == 'ref_data':
+            rds_db_nm = os.environ['RDS_REF_DB_NAME']
+        elif database_name == 'mdm_raw':
+            rds_db_nm = os.environ['RDS_RAW_DB_NAME']
+        elif database_name == 'mdm_refined':
+            rds_db_nm = os.environ['RDS_REFINED_DB_NAME']
+        else:
+            rds_db_nm = os.environ['RDS_DB_NAME']
+
+        as400_engine = None
+
+        # Map source_system to AS400 secret & engine (adjust keys as per your env)
+        if source_system.lower() == 'as400_affprd':
+            as400_secret_name = os.environ["AS400_AFF_SECRETS_MANAGER_ID"]
+            as400_engine = get_as400_db_session(as400_secret_name, region_name)
+        elif source_system.lower() == 'as400_attorney':
+            as400_secret_name = os.environ["AS400_ATTORNEY_SECRETS_MANAGER_ID"]
+            as400_engine = get_as400_db_session(as400_secret_name, region_name)
+        elif source_system.lower() == 'as400_kkins':
+            as400_secret_name = os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+            as400_engine = get_as400_db_session(as400_secret_name, region_name)
+        else:
+            # Default/fallback AS400 secret if needed
+            maybe_secret = os.environ.get("AS400_DEFAULT_SECRETS_MANAGER_ID")
+            if maybe_secret:
+                as400_engine = get_as400_db_session(maybe_secret, region_name)
+
+        # RDS session for DF schema
+        session = get_rds_db_session(rds_secret_name, region_name, rds_host_nm, rds_db_nm)
+
+        return session, as400_engine
+
+    return None, None
+
+def lookup_as400_for_policy(config=None, policy_identifier=None):
+    """
+    Query the AS400 database to fetch policy-level data.
+    - config: config dict from SQS
+    - policy_identifier: the key to lookup (could be source_policy_id or policy_number)
+    Returns dict (single record) or None
+    """
+    df = None
+    source_system = config.get('source_system') if config else None
+    if not source_system or not policy_identifier:
+        return None
+
+    # Example SQLs for 3 source systems. Adjust table/column names to match real AS400 schema.
+    try:
+        if source_system.lower() == 'as400_affprd':
+            # NOTE: Replace ADGPOLY and column names with your actual AS400 policy table/columns
+            df = pd.read_sql(f"""
+                SELECT
+                    CAST(NULL AS varchar(36)) AS df_policy_id,
+                    TRIM(POLNBR) AS source_policy_number,
+                    TRIM(POLNBR) AS source_policy_id,
+                    TRIM(POLSTAT) AS source_policy_status,
+                    TRIM(POLAGNT) AS source_agency_id,
+                    TRIM(POLAGCT) AS source_agency_contact_id,
+                    TRIM(POLCUST) AS source_customer_id,
+                    TRIM(POLPROD) AS source_product_id,
+                    POL_ISSUE_DATE AS policy_issue_date,
+                    CREATED_DATE AS created_date,
+                    MODIFIED_DATE AS modified_date,
+                    'AS400_AFFPRD' AS source_system
+                FROM ADGPOLY.POLICY_TABLE   -- <-- replace with actual table
+                WHERE TRIM(POLNBR) = '{policy_identifier}'
+                """, con=as400_engine)
+
+        elif source_system.lower() == 'as400_attorney':
+            # Example: LAW policy table (adjust names)
+            df = pd.read_sql(f"""
+                SELECT
+                    CAST(NULL AS varchar(36)) AS df_policy_id,
+                    TRIM(POLICY_NO) AS source_policy_number,
+                    TRIM(POLICY_NO) AS source_policy_id,
+                    TRIM(STATUS) AS source_policy_status,
+                    TRIM(AGENCY_ID) AS source_agency_id,
+                    TRIM(AGENCY_CONTACT_ID) AS source_agency_contact_id,
+                    TRIM(CUSTOMER_ID) AS source_customer_id,
+                    TRIM(PRODUCT_ID) AS source_product_id,
+                    ISSUE_DATE AS policy_issue_date,
+                    CREATED_DATE AS created_date,
+                    MODIFIED_DATE AS modified_date,
+                    'AS400_Attorney' AS source_system
+                FROM LAWDTAPR.LAW_POLICY
+                WHERE TRIM(POLICY_NO) = '{policy_identifier}'
+                """, con=as400_engine)
+
+        elif source_system.lower() == 'as400_kkins':
+            # Example combined query from PLCYPROD schema
+            df = pd.read_sql(f"""
+                SELECT
+                    CAST(NULL AS varchar(36)) AS df_policy_id,
+                    (ap.AGY_AGENT_CODE || '-' || ap.AGY_NUMBER || '-' || ap.POL_NUMBER) AS source_policy_id,
+                    ap.POL_NUMBER AS source_policy_number,
+                    ap.POL_STATUS AS source_policy_status,
+                    ap.AGY_NUMBER AS source_agency_id,
+                    ap.AGY_AGENT_CODE AS source_agency_contact_id,
+                    ap.CUST_NUMBER AS source_customer_id,
+                    ap.PROD_CODE AS source_product_id,
+                    ap.POL_ISSUE_DT AS policy_issue_date,
+                    ap.CREATED_DT AS created_date,
+                    ap.MODIFIED_DT AS modified_date,
+                    'AS400_KKINS' AS source_system
+                FROM PLCYPROD.POLICY ap
+                WHERE ap.POL_NUMBER = '{policy_identifier}'
+                """, con=as400_engine)
+        else:
+            # Unknown source system: return None
+            return None
+    except Exception as e:
+        # If as400_engine isn't defined in this function scope, try to get it via call_session_engine
+        # (the caller should have set as400_engine global after call_session_engine)
+        asyncio.create_task(log_msg(common_logger, log_messages='AS400 lookup error', api_response=str(e)))
+        return None
+
+    if df is not None and len(df) > 0:
+        # Convert to record dict and normalize keys (simple)
+        record = df.to_dict('records')[0]
+        # convert pandas timestamps to str if necessary
+        return record
+    return None
+
+async def consume_lambda(config=None):
+    asyncio.create_task(log_msg(common_logger, log_messages='consume policy lambda invoking'))
+    now = datetime.now()
+    start_timestamp = datetime.timestamp(now)
+    asyncio.create_task(log_msg(common_logger, log_messages=f'Processing to DB @ {now} | {start_timestamp}'))
+
+    try:
+        asyncio.create_task(log_msg(common_logger, log_messages='Config', api_response=convert_timestamps(config)))
+        config_dicts = config if type(config) is dict else json.loads(str(config))
+        if type(config_dicts) == list:
+            pass
+        else:
+            config_dicts = [config_dicts]
+
+        for config_dict in config_dicts:
+            # Accept either source_policy_id or source_policy_number in incoming payload
+            policy_key = config_dict.get('source_policy_id') or config_dict.get('source_policy_number') or config_dict.get('policy_number')
+            source_system = config_dict.get('source_system')
+            if not policy_key:
+                asyncio.create_task(log_msg(common_logger, log_messages='No policy id provided in message', api_response=config_dict))
+                continue
+
+            print("Calling call_session_engine Function for policy")
+            global session, as400_engine
+            session, as400_engine = call_session_engine(source_system=source_system)
+
+            # Lookup AS400 policy
+            as400_policy_summary = lookup_as400_for_policy(config=config_dict, policy_identifier=policy_key)
+            if as400_policy_summary:
+                asyncio.create_task(log_msg(common_logger, log_messages=f'Initial {source_system} Policy Summary dict:', api_response=convert_timestamps(as400_policy_summary)))
+
+                # Resolve df_source_system_id
+                source_system_name = as400_policy_summary.get("source_system")
+                source_system_record = (query.first() if (query := get_record(session, model=Source_System, column_name='source_system', value=source_system_name)) is not None else None)
+                if source_system_record:
+                    as400_policy_summary['df_source_system_id'] = source_system_record.df_source_system_id
+
+                # Resolve policy_status FK -> PolicyStatus
+                source_policy_status = as400_policy_summary.get("source_policy_status")
+                if source_policy_status:
+                    status_q = get_record(session, model=PolicyStatus, column_name='policy_status', value=source_policy_status)
+                    status_rec = status_q.first() if status_q is not None else None
+                    if status_rec:
+                        as400_policy_summary['df_policy_status_id'] = status_rec.df_policy_status_id
+
+                # Resolve agency (df_agency_id) from source_agency_id
+                source_agency_id = as400_policy_summary.get("source_agency_id")
+                if source_agency_id:
+                    agency_q = get_record(session, model=Agency, column_name='source_agency_id', value=source_agency_id, df_source_system_id=as400_policy_summary.get('df_source_system_id'))
+                    agency_rec = agency_q.first() if agency_q is not None else None
+                    if agency_rec:
+                        as400_policy_summary['df_agency_id'] = agency_rec.df_agency_id
+
+                # Resolve agency contact (df_agency_contact_id) from source_agency_contact_id
+                source_agency_contact_id = as400_policy_summary.get("source_agency_contact_id")
+                if source_agency_contact_id:
+                    agency_contact_q = get_record(session, model=AgencyContact, column_name='source_agency_contact_id', value=source_agency_contact_id, df_source_system_id=as400_policy_summary.get('df_source_system_id'))
+                    agency_contact_rec = agency_contact_q.first() if agency_contact_q is not None else None
+                    if agency_contact_rec:
+                        as400_policy_summary['df_agency_contact_id'] = agency_contact_rec.df_agency_contact_id
+
+                # Resolve product FK
+                source_product_id = as400_policy_summary.get("source_product_id") or as400_policy_summary.get("source_prod")
+                if source_product_id:
+                    product_q = get_record(session, model=Product, column_name='product_id', value=source_product_id)
+                    product_rec = product_q.first() if product_q is not None else None
+                    if product_rec:
+                        as400_policy_summary['product_id'] = product_rec.product_id
+
+                # Resolve customer FK
+                source_customer_id = as400_policy_summary.get("source_customer_id")
+                if source_customer_id:
+                    customer_q = get_record(session, model=Customer, column_name='source_customer_id', value=source_customer_id, df_source_system_id=as400_policy_summary.get('df_source_system_id'))
+                    customer_rec = customer_q.first() if customer_q is not None else None
+                    if customer_rec:
+                        as400_policy_summary['df_customer_id'] = customer_rec.df_customer_id
+
+                # Build df_policy_id if not present using generate_uuid (combination of policy id and source system)
+                if not as400_policy_summary.get('df_policy_id'):
+                    as400_policy_summary['df_policy_id'] = generate_uuid(
+                        str(as400_policy_summary.get('source_policy_id') or '') + str(as400_policy_summary.get('source_policy_number') or ''),
+                        as400_policy_summary.get('df_source_system_id')
+                    )
+
+                # Upsert into DF.Policy table
+                source_policy_id = as400_policy_summary.get('source_policy_id') or as400_policy_summary.get('source_policy_number')
+                df_source_system_id = as400_policy_summary.get('df_source_system_id')
+
+                policy_record_q = get_record(session, model=Policy, column_name='policy_number', value=source_policy_id, df_source_system_id=df_source_system_id)
+                policy_existing = (policy_record_q.first() if policy_record_q is not None else None)
+
+                asyncio.create_task(log_msg(common_logger, log_messages=f'Processed Policy summary dict:', api_response=convert_timestamps(as400_policy_summary)))
+
+                if policy_existing is None:
+                    asyncio.create_task(log_msg(common_logger, log_messages='No policy found in Data Foundation. Inserting new policy'))
+                    session.add(Policy.from_dict(cls=Policy, d=as400_policy_summary))
+                    session.commit()
+                    asyncio.create_task(log_msg(common_logger, log_messages=f'Inserted policy to DB @ {datetime.now()}'))
+                else:
+                    asyncio.create_task(log_msg(common_logger, log_messages='Policy exists in Data Foundation. Updating policy'))
+                    as400_policy_summary['df_policy_id'] = policy_existing.df_policy_id
+                    policy_record_q.update(query_update_dict(obj=Policy, dict=as400_policy_summary))
+                    session.commit()
+                    asyncio.create_task(log_msg(common_logger, log_messages=f'Updated policy in DB @ {datetime.now()}'))
+
+                # Optionally call SP/SQS for downstream policy processing
+                init_sp(source_transaction_id=as400_policy_summary.get('source_transaction_id') or as400_policy_summary.get('source_policy_id'))
+
+            else:
+                asyncio.create_task(log_msg(common_logger, log_messages='No policy found after AS400 lookup', api_response={'policy_key': policy_key, 'source_system': source_system}))
+
+        now = datetime.now()
+        end_timestamp = datetime.timestamp(now)
+        asyncio.create_task(log_msg(common_logger, log_messages=f'execution_time: {end_timestamp} - {start_timestamp}'))
+    except SQLAlchemyError as e:
+        asyncio.create_task(log_msg(common_logger, log_messages='Error', api_response=str(e)))
+        # rollback if session exists
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        raise e
+    except Exception as exc:
+        asyncio.create_task(log_msg(common_logger, log_messages='Unhandled Error', api_response=str(exc)))
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        raise exc
+
+def handle(event, context):
+    start_time = time.time()
+    print("Policy handle function is called")
+    for record in event.get('Records', []):
+        payload = record.get("body")
+        # payload may be JSON string or JSON list - consume_lambda handles both
+        asyncio.run(consume_lambda(config=payload))
+    end_time = time.time()
+    return {
+        "execution_time_sec": end_time - start_time
+    }
+
+if __name__ == '__main__':
+    # Example call with a single policy id payload - adjust policy id to test.
+    handle({'Records': [{'body': '{"source_policy_id":"POL123456","source_system":"AS400_AFFPRD"}'}]}, None)
