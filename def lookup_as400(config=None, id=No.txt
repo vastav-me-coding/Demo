@@ -1,0 +1,155 @@
+def lookup_as400(config=None, id=None, engine=None):
+source_system = config['source_system']
+if source_system:
+if source_system.lower() == 'as400_aff':
+df = pd.read_sql(f"""
+SELECT * FROM (
+SELECT
+ROW_NUMBER() OVER (
+PARTITION BY a.ACCOUNT_NO
+ORDER BY c.ENDORSEMENT_SEQ_NO DESC
+) AS row_num,
+a.ACCOUNT_NO AS policy_number,
+c.ENDORSEMENT_NO AS endorsement_number,
+c.ENDORSEMENT_SEQ_NO AS endorsement_sequence_number,
+CASE
+WHEN a.ENTITY_STATUS = 'A' THEN 'Active'
+WHEN a.ENTITY_STATUS = 'T' THEN 'Terminated'
+WHEN a.ENTITY_STATUS = 'R' THEN 'Active'
+WHEN a.ENTITY_STATUS = 'P' THEN 'Pending'
+WHEN a.ENTITY_STATUS = 'Q' THEN 'Active'
+WHEN a.ENTITY_STATUS = 'Z' THEN 'Terminated'
+END AS source_policy_status,
+CASE
+WHEN (a.PROFESSION_FLAG IN ('NUR','PAS','PNM','CNS','CRN') AND a.POLICY_TYPE = 'I') THEN '71a7b727-0787-4935-a0d0-0704dbcdd711'
+WHEN (a.PROFESSION_FLAG IN ('NUR','PAS','PNM','CNS','CRN') AND a.POLICY_TYPE != 'I') THEN 'e71ba4fc-afa1-4396-a8ef-c7a22765adb8'
+WHEN (a.PROFESSION_FLAG NOT IN ('NUR','PAS','PNM','CNS','CRN') AND a.POLICY_TYPE != 'I') THEN '2bd40533-6f37-4239-bfbf-8f22feddbb2e'
+WHEN (a.PROFESSION_FLAG NOT IN ('NUR','PAS','PNM','CNS','CRN') AND a.POLICY_TYPE = 'I') THEN 'f84e4b29-8069-45b5-8e46-835cf590a569'
+WHEN a.POLICY_TYPE = 'U' THEN '5b0f4296-767c-4196-bd10-d13d2fc68ad8'
+END AS product_id,
+TRIM(a.SUBPROD_NO) AS source_agency_id,
+a.CUSTOMER_NO AS source_customer_id,
+a.POLICY_EFF_DATE AS effective_date,
+a.POLICY_EXP_DATE AS expiration_date,
+b.POLICY_ISSUE_DATE AS policy_issue_date,
+'AS400_AFFDEV' AS source_system
+FROM dm_stelo.ADGDTADV_NSOCVGP a
+INNER JOIN dm_stelo.ADGDTADV_ADGACIP b ON a.CUSTOMER_NO = b.CUSTOMER_NO
+INNER JOIN dm_stelo.ADGDTADV_HCPCVEP c
+ON a.CUSTOMER_NO = c.CUSTOMER_NO
+AND a.POLICY_EFF_DATE = c.EFFECTIVE_DATE
+AND a.POLICY_EXP_DATE = c.TERMIN_DATE
+WHERE a.POLICY_EFF_DATE <= DATE_FORMAT(NOW(), '%Y%m%d')
+AND a.POLICY_EXP_DATE > DATE_FORMAT(NOW(), '%Y%m%d')
+AND a.ENTITY_STATUS = 'A'
+) ab
+WHERE row_num = 1 AND {"source_customer_id" if "source_customer_id" in config else "policy_number"} = {id}
+""", con=engine)
+else:
+df=None
+
+python
+Copy code
+if(len(df)>0):
+    return df.to_dict('records')[0]
+else:
+    return None
+def consume_as400_lambda(config=None):
+now = datetime.now()
+start_timestamp = datetime.timestamp(now)
+asyncio.create_task(log_msg(common_logger,log_messages=f'Processing to DB @ {now} | {datetime.timestamp(now)}'))
+try:
+logger.info(config)
+config_dicts = config if type(config) is dict else json.loads(str(config))
+if type(config_dicts) == list:
+pass
+else:
+config_dicts = [config_dicts]
+for config_dict in config_dicts:
+id = config_dict['source_customer_id'] if 'source_customer_id' in config_dict else config_dict['source_policy_id']
+source_system = config_dict['source_system'].lower()
+if(id):
+# fk_flag = 1
+print("Calling call_session_engine Function ")
+global session
+session = call_session_engine(database_name=pnc_db)
+
+scss
+Copy code
+            as400_policy_summary_dict = lookup_as400(config=config_dict, id=id, engine=session)
+            print(as400_policy_summary_dict)
+    now = datetime.now()
+    end_timestamp = datetime.timestamp(now)
+    return {'execution_time': end_timestamp - start_timestamp}
+except SQLAlchemyError as e:
+    # asyncio.create_task(log_msg(common_logger,log_messages='Error',api_response=e))
+    session.rollback()
+    raise e
+def handle(event, context):
+start_time = time.time()
+for record in event['Records']:
+logger.info(record)
+payload = record["body"]
+# asyncio.run(consume_lambda(config=payload))
+consume_as400_lambda(config=payload)
+
+lua
+Copy code
+end_time = time.time()
+
+return {
+    "execution_time_sec": end_time - start_time 
+}
+Can you please let me know what is getting retrun in as400_policy_summary_dict
+
+
+
+Certainly! Let’s break down what as400_policy_summary_dict contains and how it is generated in your code.
+
+Step-by-Step Breakdown
+1. Where does as400_policy_summary_dict come from?
+It is assigned the return value of lookup_as400(config=config_dict, id=id, engine=session).
+2. What does lookup_as400 return?
+The function runs a SQL query on the AS400 database, and if it finds matching records, it returns the first record as a Python dictionary.
+If no record is found, it returns None.
+3. What fields are in the returned dictionary?
+The SQL query selects and transforms several fields. Here’s what’s included in each returned record (dictionary):
+
+Field Name	Description
+policy_number	Policy/account number (a.ACCOUNT_NO)
+endorsement_number	Endorsement number (c.ENDORSEMENT_NO)
+endorsement_sequence_number	Endorsement sequence number (c.ENDORSEMENT_SEQ_NO)
+source_policy_status	Status mapped from a.ENTITY_STATUS ('Active', 'Terminated', etc.)
+product_id	Product ID mapped by profession flag and policy type
+source_agency_id	Agency ID (trimmed a.SUBPROD_NO)
+source_customer_id	Customer ID (a.CUSTOMER_NO)
+effective_date	Policy effective date (a.POLICY_EFF_DATE)
+expiration_date	Policy expiration date (a.POLICY_EXP_DATE)
+policy_issue_date	Date policy was issued (b.POLICY_ISSUE_DATE)
+source_system	Hardcoded as 'AS400_AFFDEV'
+4. Example of as400_policy_summary_dict:
+If a record is found, the returned dictionary will look like:
+
+python
+Copy code
+{
+    'policy_number': '123456',
+    'endorsement_number': 'E789',
+    'endorsement_sequence_number': 2,
+    'source_policy_status': 'Active',
+    'product_id': '71a7b727-0787-4935-a0d0-0704dbcdd711',
+    'source_agency_id': 'AGCY123',
+    'source_customer_id': 'CUST456',
+    'effective_date': '20240101',
+    'expiration_date': '20250101',
+    'policy_issue_date': '20231215',
+    'source_system': 'AS400_AFFDEV'
+}
+If no record is found, as400_policy_summary_dict will be None.
+
+Summary
+as400_policy_summary_dict is either:
+
+A dictionary containing the policy summary fields listed above (from the first matching record in the AS400 database), or
+None if no matching record exists.
+If you need more detail on any field or how the query works, let me know!
