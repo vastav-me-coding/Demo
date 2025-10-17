@@ -1,0 +1,39 @@
+## TODO Move Transaction to separate SQS Consumer for AS400 following commentted code logic needs to move to new consumer 
+            # # --- Transaction Upsert ---
+            # txn_record = multi_filter_get_record(session, model=Transaction,
+            #                                      source_transaction_id=as400_policy_dict["source_transaction_id"],
+            #                                      df_source_system_id=df_source_system_id)
+            # existing_txn = txn_record.first() if txn_record else None
+
+            # if not existing_txn:
+            #     as400_policy_dict['df_transaction_id'] = generate_uuid(
+            #         str(as400_policy_dict["source_transaction_id"]) + str(as400_policy_dict["policy_number"]),
+            #         str(df_source_system_id)
+            #     )
+            #     session.add(Transaction.from_dict(cls=Transaction, d=as400_policy_dict))
+            #     asyncio.create_task(log_msg(logger, log_messages=f'Inserted Transaction for Policy {id}'))
+            # else:
+            #     as400_policy_dict['df_transaction_id'] = existing_txn.df_transaction_id
+            #     txn_record.update(query_update_dict(obj=Transaction, dict=as400_policy_dict))
+            #     asyncio.create_task(log_msg(logger, log_messages=f'Updated Transaction for Policy {id}'))
+
+            # session.commit()
+
+            # # --- Update is_latest / is_future Flags ---
+            # df_policy_id = as400_policy_dict['df_policy_id']
+            # session.execute(update(Transaction).where(Transaction.df_policy_id == df_policy_id)
+            #                 .values(is_latest_transaction=None, is_future_transaction=None))
+            # session.commit()
+
+            # latest_txn, future_txn = latest_transaction_id(event=session, df_policy_id=df_policy_id)
+            # if latest_txn:
+            #     session.execute(update(Transaction)
+            #                     .where(and_(Transaction.df_policy_id == df_policy_id,
+            #                                 Transaction.source_transaction_id == latest_txn))
+            #                     .values(is_latest_transaction=1))
+            # if future_txn:
+            #     session.execute(update(Transaction)
+            #                     .where(and_(Transaction.df_policy_id == df_policy_id,
+            #                                 Transaction.source_transaction_id == future_txn))
+            #                     .values(is_future_transaction=1))
+            # session.commit()
