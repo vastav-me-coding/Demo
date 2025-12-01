@@ -1,326 +1,643 @@
-SELECT 
-    main.source_invoice_id,
-    main.source_invoice_id + '_bp' AS source_line_item_id,
-    'base_premium' AS source_line_item_type,
-    'Base Premium' AS description,
-    main.BASE_PREMIUM AS amount
-FROM (
-    SELECT DISTINCT 
-        da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
-        cov.BASE_PREMIUM,
-        cov.TAX,
-        da.commission_amount,
-        CASE 
-            WHEN ds.total_discount != 0 THEN ds.total_discount
-            WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
-            ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
-        END AS Discount
-    FROM 
-        (
-            SELECT DISTINCT 
-                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
-                INVOICE_NO,
-                SUM(PREMIUM) AS premium,
-                SUM(commission_amount) AS commission_amount,
-                CASE	
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
-                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
-                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
-                        THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
-                    ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
-                END AS effective_date 
-            FROM 
-                ADGDTADV.U__ARFILE
-            GROUP BY 
-                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
-                INVOICE_NO,
-                EFFECTIVE_DATE_6
-        ) AS da
-    INNER JOIN 
-        (
+
+
+
+import os
+import logging
+import json
+import time
+import pandas as pd
+import asyncio
+from datetime import datetime
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import and_
+
+# --- DF imports ---
+from df_database_models.db_conn import get_rds_db_session, get_as400_db_session
+from df_database_models.models import (
+    Policy,
+    Policy_Number_Version, 
+    Policy_Status, 
+    Source_System
+)
+from df_database_models.db_utils import (
+    generate_uuid,
+    convert_timestamps,
+    query_update_dict,
+    multi_filter_get_record,
+    policy_version_increment
+)
+from adf_pyutils.clm_wrapper import common_logger, generate_response_log_details
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+
+os.environ["AWS_REGION"] = "us-east-1"
+
+os.environ['RDS_DB_NAME'] = "pnc_warehouse"
+os.environ['RDS_REF_DB_NAME'] = "ref_data"
+os.environ['RDS_RAW_DB_NAME'] = "mdm_raw"
+os.environ['RDS_REFINED_DB_NAME'] = "mdm_refined"
+
+os.environ['AS400_AFF_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-azsql-affpmsqc-credentials-secret-XJspXZ"
+os.environ['AS400_KKINS_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-azsql-kkinsqc-credentials-secret-KThAVI"
+os.environ['AUMINE_AFF_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-audbm-affods-credentials-secret-vclZk7"
+os.environ['AUMINE_AUM_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-audbm-aumods-credentials-secret-tOkXG3"
+
+os.environ['RDS_HOST'] = "affinity-ods2-develop.cluster-cj3qp6qspcpk.us-east-1.rds.amazonaws.com"
+os.environ['RDS_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-ods2-ar4262-dv001-rds-master-credentials-169S6S"
+os.environ['SQS_POLICY_UPDATE_URL'] = "https://6ekyb6mh5sxa3wpf3waq7ckvy40gckvy.lambda-url.us-east-1.on.aws/policy-update"
+os.environ['SQS_PRODUCER_SECRET_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-tds-sqs-producer-v2-credentials-Cna5zK"
+
+pnc_db = os.environ['RDS_DB_NAME']
+ref_db = os.environ['RDS_REF_DB_NAME']
+mdm_raw_db = os.environ['RDS_RAW_DB_NAME']
+mdm_refined_db = os.environ['RDS_REFINED_DB_NAME']
+
+# --- Env DB Configs ---
+os.environ["AWS_REGION"] = "us-east-1"
+os.environ['RDS_DB_NAME'] = "pnc_warehouse"
+os.environ['RDS_REF_DB_NAME'] = "ref_data"
+os.environ['RDS_RAW_DB_NAME'] = "mdm_raw"
+os.environ['RDS_REFINED_DB_NAME'] = "mdm_refined"
+
+
+
+# --- Global DB config ---
+pnc_db = os.environ['RDS_DB_NAME']
+ref_db = os.environ['RDS_REF_DB_NAME']
+mdm_raw_db = os.environ['RDS_RAW_DB_NAME']
+mdm_refined_db = os.environ['RDS_REFINED_DB_NAME']
+
+# ------------------------------------------------------------
+# Logging helper
+# ------------------------------------------------------------
+async def log_msg(func, **kwargs):
+    await asyncio.to_thread(func, **kwargs)
+
+# ------------------------------------------------------------
+# Session creation
+# ------------------------------------------------------------
+def call_session_engine(source_system=None, database_name=None):
+    rds_secret_name = os.environ["RDS_SECRETS_MANAGER_ID"]
+    region_name = os.environ["AWS_REGION"]
+    rds_host_nm = os.environ['RDS_HOST']
+
+    if database_name:
+        if database_name == 'ref_data':
+            rds_db_nm = os.environ['RDS_REF_DB_NAME']
+        elif database_name == 'mdm_raw':
+            rds_db_nm = os.environ['RDS_RAW_DB_NAME']
+        elif database_name == 'mdm_refined':
+            rds_db_nm = os.environ['RDS_REFINED_DB_NAME']
+        else:
+            rds_db_nm = os.environ['RDS_DB_NAME']
+    else:
+        rds_db_nm = os.environ['RDS_DB_NAME']
+
+    if source_system and source_system.lower() == 'as400_aff':
+        as400_secret_name = os.environ["AS400_AFF_SECRETS_MANAGER_ID"]
+        return get_as400_db_session(as400_secret_name, region_name)
+
+    elif source_system and source_system.lower() == 'as400_kkins':
+        as400_secret_name = os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+        return get_as400_db_session(as400_secret_name, region_name)
+
+    return get_rds_db_session(rds_secret_name, region_name, rds_host_nm, rds_db_nm)
+
+
+# --- Global Sessions ---
+session = call_session_engine(database_name=pnc_db)
+as400_engine_aff = call_session_engine(source_system='as400_aff')
+as400_engine_kkins = call_session_engine(source_system='as400_kkins')
+
+# ------------------------------------------------------------
+# AS400 Lookup Function
+# ------------------------------------------------------------
+def lookup_as400(config=None, id=None):
+    """
+    Fetch a coverage carrier allocation record from AS400 based on allocation ID.
+    Adjust table/column names based on your AS400 schema.
+    """
+    source_system = config.get("source_system").lower()
+    print(id, source_system, '***')
+    if(source_system and source_system.lower() == 'as400_aff'):
+            df = pd.read_sql(f"""
+                WITH base AS (
+                SELECT 
+                    a.ACCOUNT_NO AS policy_number,
+                    a.CUSTOMER_NO AS customer_number,
+                    a.NEW_OR_RENEW AS transaction_type,
+                    a.POLICY_EFF_DATE AS policy_effective_date,
+                    a.POLICY_EXP_DATE AS policy_expiration_date,
+                    a.LAST_CHANGE_DATE AS transaction_date,
+                    a.ENTITY_STATUS AS policy_status
+                FROM ADGDTADV.NSOCVHP a
+                WHERE a.ENTITY_STATUS NOT IN ('Q','Z')
+            ),
+            ordered AS (
+                SELECT 
+                    b.*,
+                    LAG(b.policy_number) OVER(PARTITION BY b.customer_number ORDER BY b.policy_effective_date) AS prev_policy_number,
+                    LAG(b.policy_expiration_date) OVER(PARTITION BY b.customer_number ORDER BY b.policy_effective_date) AS prev_exp_date
+                FROM base b
+            ),
+            lineage AS (
+                SELECT 
+                    od.*,
+                    CASE
+                        WHEN od.prev_policy_number IS NULL THEN 1
+                        WHEN od.policy_number = od.prev_policy_number THEN 0
+                        WHEN od.policy_effective_date = od.prev_exp_date THEN 1
+                        ELSE 2
+                    END AS lineage_flag
+                FROM ordered od
+            ),
+            versioned AS (
+                SELECT 
+                    li.*,
+                    SUM(CASE WHEN li.lineage_flag = 2 THEN 1 ELSE 0 END) 
+                        OVER(PARTITION BY li.customer_number ORDER BY li.policy_effective_date ROWS UNBOUNDED PRECEDING) + 1 AS version_number
+                FROM lineage li
+            )
             SELECT 
-                CUSTOMER_NO,
-                EFFECTIVE_DATE,
-                ACCOUNT_NO,
-                BASE_PREMIUM,
-                TOTAL_PREMIUM,
-                POLICY_EFF_DATE,
-                INVOICE_NO,
-                (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
-                LAST_PAYMENT_DATE
-            FROM ADGDTADV.NSOCVGP
-        ) AS cov 
-        ON cov.CUSTOMER_NO = da.customer_number 
-        AND cov.EFFECTIVE_DATE = da.effective_date
-        AND cov.INVOICE_NO = da.invoice_no
-    LEFT JOIN 
-        (
-            SELECT 
-                GRCUST AS customer_no,
-                GRDISP AS discount_percentage,
-                GRPEFF AS effective_date,
-                GRSEQN AS seq_no
-            FROM ADGDTADV.HCPGRDCP
-        ) AS dis
-        ON dis.customer_no = da.customer_number 
-        AND dis.effective_date = da.effective_date
-    LEFT JOIN 
-        (
-            SELECT 
+                policy_number,
                 customer_number,
-                cvg_effective_date AS effective_date,
-                total_discount
-            FROM ADGDTADV.ADGDSRP
-        ) AS ds
-        ON ds.customer_number = da.customer_number 
-        AND ds.effective_date = da.effective_date
-) AS main
-UNION ALL
-SELECT 
-    main.source_invoice_id,
-    main.source_invoice_id + '_tax' AS source_line_item_id,
-    'tax' AS source_line_item_type,
-    'Tax' AS description,
-    main.TAX AS amount
-FROM (
-    -- Repeat the same subquery as above for each UNION ALL
-    SELECT DISTINCT 
-        da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
-        cov.BASE_PREMIUM,
-        cov.TAX,
-        da.commission_amount,
-        CASE 
-            WHEN ds.total_discount != 0 THEN ds.total_discount
-            WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
-            ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
-        END AS Discount
-    FROM 
-        (
-            SELECT DISTINCT 
-                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
-                INVOICE_NO,
-                SUM(PREMIUM) AS premium,
-                SUM(commission_amount) AS commission_amount,
-                CASE	
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
-                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
-                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
-                        THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
-                    ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
-                END AS effective_date 
-            FROM 
-                ADGDTADV.U__ARFILE
-            GROUP BY 
-                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
-                INVOICE_NO,
-                EFFECTIVE_DATE_6
-        ) AS da
-    INNER JOIN 
-        (
-            SELECT 
-                CUSTOMER_NO,
-                EFFECTIVE_DATE,
-                ACCOUNT_NO,
-                BASE_PREMIUM,
-                TOTAL_PREMIUM,
-                POLICY_EFF_DATE,
-                INVOICE_NO,
-                (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
-                LAST_PAYMENT_DATE
-            FROM ADGDTADV.NSOCVGP
-        ) AS cov 
-        ON cov.CUSTOMER_NO = da.customer_number 
-        AND cov.EFFECTIVE_DATE = da.effective_date
-        AND cov.INVOICE_NO = da.invoice_no
-    LEFT JOIN 
-        (
-            SELECT 
-                GRCUST AS customer_no,
-                GRDISP AS discount_percentage,
-                GRPEFF AS effective_date,
-                GRSEQN AS seq_no
-            FROM ADGDTADV.HCPGRDCP
-        ) AS dis
-        ON dis.customer_no = da.customer_number 
-        AND dis.effective_date = da.effective_date
-    LEFT JOIN 
-        (
-            SELECT 
-                customer_number,
-                cvg_effective_date AS effective_date,
-                total_discount
-            FROM ADGDTADV.ADGDSRP
-        ) AS ds
-        ON ds.customer_number = da.customer_number 
-        AND ds.effective_date = da.effective_date
-) AS main
-UNION ALL
-SELECT 
-    main.source_invoice_id,
-    main.source_invoice_id + '_ca' AS source_line_item_id,
-    'commission_amount' AS source_line_item_type,
-    'Commission Amount' AS description,
-    main.commission_amount AS amount
-FROM (
-    -- Repeat the same subquery as above for each UNION ALL
-    SELECT DISTINCT 
-da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
-        cov.BASE_PREMIUM,
-        cov.TAX,
-        da.commission_amount,
-        CASE 
-            WHEN ds.total_discount != 0 THEN ds.total_discount
-            WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
-            ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
-        END AS Discount
-    FROM 
-        (
-            SELECT DISTINCT 
-                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
-                INVOICE_NO,
-                SUM(PREMIUM) AS premium,
-                SUM(commission_amount) AS commission_amount,
-                CASE	
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
-                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
-                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
-                        THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
-                    ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
-                END AS effective_date 
-            FROM 
-                ADGDTADV.U__ARFILE
-            GROUP BY 
-                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
-                INVOICE_NO,
-                EFFECTIVE_DATE_6
-        ) AS da
-    INNER JOIN 
-        (
-            SELECT 
-                CUSTOMER_NO,
-                EFFECTIVE_DATE,
-                ACCOUNT_NO,
-                BASE_PREMIUM,
-                TOTAL_PREMIUM,
-                POLICY_EFF_DATE,
-                INVOICE_NO,
-                (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
-                LAST_PAYMENT_DATE
-            FROM ADGDTADV.NSOCVGP
-        ) AS cov 
-        ON cov.CUSTOMER_NO = da.customer_number 
-        AND cov.EFFECTIVE_DATE = da.effective_date
-        AND cov.INVOICE_NO = da.invoice_no
-    LEFT JOIN 
-        (
-            SELECT 
-                GRCUST AS customer_no,
-                GRDISP AS discount_percentage,
-                GRPEFF AS effective_date,
-                GRSEQN AS seq_no
-            FROM ADGDTADV.HCPGRDCP
-        ) AS dis
-        ON dis.customer_no = da.customer_number 
-        AND dis.effective_date = da.effective_date
-    LEFT JOIN 
-        (
-            SELECT 
-                customer_number,
-                cvg_effective_date AS effective_date,
-                total_discount
-            FROM ADGDTADV.ADGDSRP
-        ) AS ds
-        ON ds.customer_number = da.customer_number 
-        AND ds.effective_date = da.effective_date
-) AS main
-UNION ALL
-SELECT 
-    main.source_invoice_id,
-    main.source_invoice_id + '_dis' AS source_line_item_id,
-    'discount' AS source_line_item_type,
-    'Discount' AS description,
-    main.Discount AS amount
-FROM (
-    -- Repeat the same subquery as above for each UNION ALL
-    SELECT DISTINCT 
-        da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
-        cov.BASE_PREMIUM,
-   cov.TAX,
-        da.commission_amount,
-        CASE 
-            WHEN ds.total_discount != 0 THEN ds.total_discount
-            WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
-            ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
-        END AS Discount
-    FROM 
-        (
-            SELECT DISTINCT 
-                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
-                INVOICE_NO,
-                SUM(PREMIUM) AS premium,
-                SUM(commission_amount) AS commission_amount,
-                CASE	
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
-                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
-                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
-                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
-                        THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
-                    ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
-                END AS effective_date 
-            FROM 
-                ADGDTADV.U__ARFILE
-            GROUP BY 
-                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
-                INVOICE_NO,
-                EFFECTIVE_DATE_6
-        ) AS da
-    INNER JOIN 
-        (
-            SELECT 
-                CUSTOMER_NO,
-                EFFECTIVE_DATE,
-                ACCOUNT_NO,
-                BASE_PREMIUM,
-                TOTAL_PREMIUM,
-                POLICY_EFF_DATE,
-                INVOICE_NO,
-                (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
-                LAST_PAYMENT_DATE
-            FROM ADGDTADV.NSOCVGP
-        ) AS cov 
-        ON cov.CUSTOMER_NO = da.customer_number 
-        AND cov.EFFECTIVE_DATE = da.effective_date
-        AND cov.INVOICE_NO = da.invoice_no
-    LEFT JOIN 
-        (
-            SELECT 
-                GRCUST AS customer_no,
-                GRDISP AS discount_percentage,
-                GRPEFF AS effective_date,
-                GRSEQN AS seq_no
-            FROM ADGDTADV.HCPGRDCP
-        ) AS dis
-        ON dis.customer_no = da.customer_number 
-        AND dis.effective_date = da.effective_date
-    LEFT JOIN 
-        (
-            SELECT 
-                customer_number,
-                cvg_effective_date AS effective_date,
-                total_discount
-            FROM ADGDTADV.ADGDSRP
-        ) AS ds
-        ON ds.customer_number = da.customer_number 
-        AND ds.effective_date = da.effective_date
-) AS main
+                transaction_type,
+                policy_effective_date,
+                policy_expiration_date,
+                transaction_date,
+                policy_status,
+                CONCAT('V', CAST(version_number AS VARCHAR(10))) AS policy_version
+            FROM versioned
+            Where policy_number = '{id}';
+                """, con=as400_engine_aff)
+
+    elif(source_system and source_system.lower() == 'as400_kkins'):
+            df = pd.read_sql(f"""
+                    WITH policy_chain (policy_number, renewed_to, renewal_of, effective_date, expiration_date, endorsement, version_depth, customer, root_policy, policy_status, agency_id, agency_contact_id, policy_issue_date, product_code) AS (
+
+                    SELECT policy_number, renewed_to, renewal_of, effective_date, expiration_date, endorsement, 0 AS version_depth, customer, root_policy, policy_status, agency_id, agency_contact_id, policy_issue_date, product_code
+                    FROM (SELECT DISTINCT 
+                        (au.PL_COMPANY || au.PL_PREFIX || au.PL_POL_NBR || PL_SUFFIX) AS policy_number,
+                        (au.PL_RENEWED_TO_CMP_NBR || au.PL_RENEWED_TO_PFX_NBR || au.PL_RENEWED_TO_POL_NBR || PL_RENEWED_TO_SUFFIX) AS renewed_to,
+                        (au.PL_RENEWAL_OF_CMP_NBR || au.PL_RENEWAL_OF_PFX_NBR || au.PL_RENEWAL_OF_POL_NBR || PL_RENEWAL_OF_SUFFIX) AS renewal_of,
+                        CASE WHEN substring(PL_EFF_DATE_YMD, 1, 1) = '1' THEN '20' || SUBSTRING(PL_EFF_DATE_YMD, 2, 6) 
+                            WHEN PL_EFF_DATE_YMD = '0' THEN NULL 
+                            ELSE '19' || SUBSTRING(PL_EFF_DATE_YMD, 1, 6) END AS effective_date,
+                        CASE WHEN substring(PL_EXP_DATE, 1, 1) = '1' THEN '20' || SUBSTRING(PL_EXP_DATE, 2, 6) 
+                            WHEN PL_EXP_DATE = '0' THEN NULL 
+                            ELSE '19' || SUBSTRING(PL_EXP_DATE, 1, 6) END AS expiration_date,
+                        au.PL_ENDT_NO AS endorsement,
+                        (au.AC_ACCOUNT_NBR || '-' || au.AC_ACCOUNT_NAME) AS customer,
+                        (au.PL_COMPANY || au.PL_PREFIX || au.PL_POL_NBR || PL_SUFFIX) AS root_policy,
+                        au.PL_POLICY_STATUS AS policy_status,
+                        au.AGY_AGENT_NBR AS agency_id,
+                        au.AGY_AGENT_CODE AS agency_contact_id,
+                        au.PL_ORIG_ISSUE AS policy_issue_date,
+                        au.PL_PRODUCT_CODE AS product_code
+                        FROM  PLCYPROD.AUZ003B AS au 
+                        WHERE --PL_POL_NBR IN ('00000187022', '00000188419', '00000185330', '00034502013', '00000318567', '00004424994', '00099890639', '00000181466') AND 
+                        (PL_RENEWAL_OF_POL_NBR = '' AND PL_ENDT_NO = '0')
+                        OR (PL_RENEWAL_OF_POL_NBR != '' AND PL_ENDT_NO = '0')) AS au
+                        WHERE renewal_of IS NULL OR TRIM(renewal_of) = ''
+                        
+                        
+                        
+                    UNION ALL
+                    
+                    SELECT au.policy_number, 
+                    au.renewed_to, 
+                    au.renewal_of, 
+                    au.effective_date,
+                    au.expiration_date, 
+                    au.endorsement,
+                    pc.version_depth + 1 AS version_depth,
+                    au.customer,
+                    pc.root_policy,
+                    au.PL_POLICY_STATUS AS policy_status,
+                    au.agency_id,
+                    au.agency_contact_id,
+                    au.policy_issue_date,
+                    au.product_code
+                    FROM (SELECT DISTINCT 
+                        (au.PL_COMPANY || au.PL_PREFIX || au.PL_POL_NBR || au.PL_SUFFIX) AS policy_number,
+                        (au.PL_RENEWED_TO_CMP_NBR || au.PL_RENEWED_TO_PFX_NBR || au.PL_RENEWED_TO_POL_NBR || PL_RENEWED_TO_SUFFIX) AS renewed_to,
+                        (au.PL_RENEWAL_OF_CMP_NBR || au.PL_RENEWAL_OF_PFX_NBR || au.PL_RENEWAL_OF_POL_NBR || PL_RENEWAL_OF_SUFFIX) AS renewal_of,
+                        CASE WHEN substring(PL_EFF_DATE_YMD, 1, 1) = '1' THEN '20' || SUBSTRING(PL_EFF_DATE_YMD, 2, 6) 
+                            WHEN PL_EFF_DATE_YMD = '0' THEN NULL 
+                            ELSE '19' || SUBSTRING(PL_EFF_DATE_YMD, 1, 6) END AS effective_date,
+                        CASE WHEN substring(PL_EXP_DATE, 1, 1) = '1' THEN '20' || SUBSTRING(PL_EXP_DATE, 2, 6) 
+                            WHEN PL_EXP_DATE = '0' THEN NULL 
+                            ELSE '19' || SUBSTRING(PL_EXP_DATE, 1, 6) END AS expiration_date,
+                        au.PL_ENDT_NO AS endorsement,
+                        (au.AC_ACCOUNT_NBR || '-' || au.AC_ACCOUNT_NAME) AS customer,
+                        au.PL_POLICY_STATUS,
+                        au.AGY_AGENT_NBR AS agency_id,
+                        au.AGY_AGENT_CODE AS agency_contact_id,
+                        au.PL_ORIG_ISSUE AS policy_issue_date,
+                        au.PL_PRODUCT_CODE AS product_code
+                        FROM PLCYPROD.AUZ003B AS au
+                        WHERE --PL_POL_NBR IN ('00000187022', '00000188419', '00000185330', '00034502013', '00000318567', '00004424994', '00099890639', '00000181466') AND 
+                        (PL_RENEWAL_OF_POL_NBR = '' AND PL_ENDT_NO = '0')
+                        OR (PL_RENEWAL_OF_POL_NBR != '' AND PL_ENDT_NO = '0')) AS au 
+                        JOIN policy_chain AS pc ON pc.policy_number = TRIM(au.renewal_of)
+
+                )
+
+
+                SELECT DISTINCT  
+                CAST(NULL AS varchar(36)) AS df_policy_number_version_id,
+                policy_number, 
+                CAST(NULL AS varchar(128)) AS df_policy_id,
+                'V' || CAST(version_depth AS varchar(5)) AS policy_version_number,
+                effective_date AS policy_effective_date,
+                expiration_date AS policy_expiration_date,
+                '0' AS is_surplus_lines,
+                CASE WHEN VERSION_DEPTH = MAX(VERSION_DEPTH) OVER(PARTITION BY ROOT_POLICY) THEN '1' ELSE '0' END AS is_latest,
+                CAST(NULL AS timestamp) AS created_date,
+                CAST(NULL AS timestamp) AS modified_date--,root_policy
+                --renewal_of,customer, root_policy--,policy_status, agency_id, agency_contact_id, policy_issue_date, product_code
+                FROM policy_chain AS p
+                WHERE --substring(policy_number, 8, 11) IN ('00000187022', '00000188419', '00000185330', '00034502013', '00000318567', '00004424994', '00099890639', '00000181466') AND 
+                policy_status NOT IN ('S', 'Q') 
+                AND policy_number = '{id}'
+                ORDER BY POLICY_VERSION_NUMBER --policy_number, effective_date, expiration_date
+
+                """, con=as400_engine_kkins)
+    else:
+        df=None
+
+    if(len(df)>0):
+        return df.to_dict('records')[0]
+    else:
+        return None
+
+
+# ------------------------------------------------------------
+# Main Consumer Function
+# ------------------------------------------------------------
+from datetime import datetime
+import json
+from sqlalchemy.exc import SQLAlchemyError
+
+def consume_lambda(config=None):
+    print("STEP 1: Policy Number Version Ingestion Started")
+    start_timestamp = datetime.timestamp(datetime.now())
+    print(f"[DEBUG] Raw config input: {config}")
+
+    try:
+        # ---------------------------------------------------------
+        # Normalize config
+        # ---------------------------------------------------------
+        # normalize config(s) into list
+        if isinstance(config, dict):
+            config_list = [config]
+        elif isinstance(config, list):
+            config_list = config
+        else:
+            config_list = json.loads(str(config))
+            if not isinstance(config_list, list):
+                config_list = [config_list]
+
+
+        print(f"[DEBUG] Normalized config_list: {config_list}")
+        for config_dict in config_list:
+            source_policy_number = config_dict.get("source_policy_id")
+            source_system = config_dict.get("source_system").lower()
+            print(
+                f"STEP 2: Processing policy={source_policy_number}, "
+                f"source_system={source_system}"
+            )
+
+            # ---------------------------------------------------------
+            # Fetch AS400 Policy Data
+            # ---------------------------------------------------------
+            print("STEP 3: Fetching AS400 policy data...")
+            as400_policy ={'policy_number': 120214309.0, 'customer_number': 400504000.0, 'transaction_type': 'R', 'policy_effective_date': 19941116.0, 'policy_expiration_date': 19951116.0, 'transaction_date': 20160929.0, 'policy_status': 'T', 'policy_version': 'V1'}#lookup_as400(config_dict, source_policy_number)
+            print(f"[DEBUG] AS400 policy lookup result: {as400_policy}")
+
+            if not as400_policy:
+                print(f"[ERROR] No AS400 record for policy={source_policy_number}")
+                continue
+
+            # ---------------------------------------------------------
+            # 1. UPSERT SOURCE_SYSTEM
+            # ---------------------------------------------------------
+            print("STEP 4: Upserting Source_System...")
+            ss = session.query(Source_System).filter(
+                Source_System.source_system == source_system
+            ).first()
+
+            if not ss:
+                print(f"[DEBUG] Source_System '{source_system}' not found, creating new")
+                df_source_system_id = generate_uuid(source_system, "SourceSystem")
+                ss_obj = Source_System(
+                    source_system=source_system,
+                    df_source_system_id=df_source_system_id
+                )
+                session.add(ss_obj)
+                session.commit()
+                print(f"[INFO] Inserted new Source_System={source_system}, "
+                        f"df_source_system_id={df_source_system_id}")
+            else:
+                df_source_system_id = ss.df_source_system_id
+                print(f"[INFO] Found existing Source_System={source_system}, "
+                        f"df_source_system_id={df_source_system_id}")
+
+            # ---------------------------------------------------------
+            # 2. UPSERT POLICY
+            # ---------------------------------------------------------
+            print("STEP 5: Upserting Policy...")
+            print(f"[DEBUG] Looking up Policy with policy_number="
+                    f"{as400_policy.get('policy_number')} and "
+                    f"df_source_system_id={df_source_system_id}")
+
+            policy_record = session.query(Policy).filter(
+                Policy.policy_number == as400_policy["policy_number"],
+                Policy.df_source_system_id == df_source_system_id
+            ).first()
+
+            if policy_record:
+                df_policy_id = policy_record.df_policy_id
+                print(f"[INFO] Policy already exists: "
+                        f"policy_number={as400_policy['policy_number']}, "
+                        f"df_policy_id={df_policy_id}")
+            else:
+                print("[DEBUG] Policy not found, creating new Policy record")
+                df_policy_id = generate_uuid(
+                    as400_policy["policy_number"], df_source_system_id
+                )
+
+                # Ensure Policy_Status exists
+                print("STEP 5.1: Ensuring Policy_Status exists...")
+                status_value = as400_policy["policy_status"]
+                print(f"[DEBUG] Policy status from AS400: {status_value}")
+
+                status_row = session.query(Policy_Status).filter(
+                    Policy_Status.policy_status == status_value
+                ).first()
+
+                if not status_row:
+                    print(f"[DEBUG] Policy_Status '{status_value}' not found, creating new")
+                    status_row = Policy_Status(policy_status=status_value)
+                    session.add(status_row)
+                    session.commit()
+                    print(f"[INFO] Inserted new Policy_Status={status_value}")
+                else:
+                    print(f"[INFO] Found existing Policy_Status={status_value}")
+
+                # Create new Policy
+                policy_obj = Policy(
+                    df_policy_id=df_policy_id,
+                    policy_number=as400_policy["policy_number"],
+                    df_policy_status_id=status_row.df_policy_status_id,
+                    source_policy_status=as400_policy["policy_status"],
+                    df_source_system_id=df_source_system_id,
+                    created_at=datetime.now()
+                )
+                session.add(policy_obj)
+                session.commit()
+                print(f"[INFO] Inserted NEW Policy={as400_policy['policy_number']}, "
+                        f"df_policy_id={df_policy_id}")
+
+            # ---------------------------------------------------------
+            # 3. UPSERT POLICY_NUMBER_VERSION
+            # ---------------------------------------------------------
+            print("STEP 6: Upserting Policy_Number_Version...")
+            print(f"[DEBUG] Looking up Policy_Number_Version with "
+                    f"policy_number={as400_policy['policy_number']}, "
+                    f"policy_version_number={as400_policy['policy_version_number']}, "
+                    f"df_policy_id={df_policy_id}")
+
+            version_record = session.query(Policy_Number_Version).filter(
+                Policy_Number_Version.policy_number == as400_policy["policy_number"],
+                Policy_Number_Version.policy_version_number == as400_policy["policy_version_number"],
+                Policy_Number_Version.df_policy_id == df_policy_id
+            ).first()
+
+            if version_record:
+                print(f"[INFO] Policy Number Version already exists: "
+                        f"df_policy_number_version_id="
+                        f"{version_record.df_policy_number_version_id}")
+            else:
+                print("[DEBUG] Policy Number Version not found, creating new")
+                uuid_key = (
+                    as400_policy["policy_number"]
+                    + as400_policy["policy_version_number"]
+                    + str(df_policy_id)
+                )
+
+                df_policy_number_version_id = generate_uuid(
+                    uuid_key, df_source_system_id
+                )
+
+                version_obj = Policy_Number_Version(
+                    df_policy_number_version_id=df_policy_number_version_id,
+                    policy_number=as400_policy["policy_number"],
+                    policy_version_number=as400_policy["policy_version_number"],
+                    policy_effective_date=as400_policy["policy_effective_date"],
+                    policy_expiration_date=as400_policy["policy_expiration_date"],
+                    df_policy_id=df_policy_id,
+                    is_latest=True,
+                    created_date=datetime.now(),
+                    df_source_system_id=df_source_system_id
+                )
+
+                session.add(version_obj)
+                session.commit()
+                print(f"[INFO] Inserted NEW Policy Number Version="
+                        f"{df_policy_number_version_id}")
+
+
+
+        end_timestamp = datetime.timestamp(datetime.now())
+        execution_time = end_timestamp - start_timestamp
+        print(f"STEP 7: Policy Number Version Ingestion Completed in "
+              f"{execution_time:.2f} seconds")
+
+        return {"execution_time_sec": execution_time}
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        print("[DB ERROR]", str(e))
+        raise e
+    except Exception as e:
+        # Catch any other errors so they are visible in logs
+        print("[UNEXPECTED ERROR]", repr(e))
+        raise e
+
+# ------------------------------------------------------------
+# Lambda Handler
+# ------------------------------------------------------------
+def handle(event, context):
+    start_time = time.time()
+    for record in event['Records']:
+        logger.info(record)
+        payload = record["body"]
+        asyncio.run(consume_lambda(config=payload))
+    end_time = time.time()
+    return {"execution_time_sec": end_time - start_time}
+
+# Example local test:
+if __name__ == "__main__":
+    handle({'Records': [{'body': '{"source_policy_id":"120214309","source_system":"as400_aff"}'}]}, None)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\urllib3\connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'secretsmanager.us-east-1.amazonaws.com'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\urllib3\connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'secretsmanager.us-east-1.amazonaws.com'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\urllib3\connectionpool.py:1097: InsecureRequestWarning: Unverified HTTPS request is being made to host 'secretsmanager.us-east-1.amazonaws.com'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+STEP 1: Policy Number Version Ingestion Started
+[DEBUG] Raw config input: {"source_policy_id":"120214309","source_system":"as400_aff"}
+[DEBUG] Normalized config_list: [{'source_policy_id': '120214309', 'source_system': 'as400_aff'}]
+STEP 2: Processing policy=120214309, source_system=as400_aff
+STEP 3: Fetching AS400 policy data...
+[DEBUG] AS400 policy lookup result: {'policy_number': 120214309.0, 'customer_number': 400504000.0, 'transaction_type': 'R', 'policy_effective_date': 19941116.0, 'policy_expiration_date': 19951116.0, 'transaction_date': 20160929.0, 'policy_status': 'T', 'policy_version': 'V1'}
+STEP 4: Upserting Source_System...
+[INFO] Found existing Source_System=as400_aff, df_source_system_id=12
+STEP 5: Upserting Policy...
+[DEBUG] Looking up Policy with policy_number=120214309.0 and df_source_system_id=12
+[DEBUG] Policy not found, creating new Policy record
+STEP 5.1: Ensuring Policy_Status exists...
+[DEBUG] Policy status from AS400: T
+[INFO] Found existing Policy_Status=T
+[DB ERROR] (pymysql.err.IntegrityError) (1048, "Column 'product_id' cannot be null")
+[SQL: INSERT INTO policy (df_policy_id, policy_number, df_policy_status_id, source_policy_status, product_id, df_agency_id, df_agency_contact_id, df_customer_id, policy_issue_date, df_source_system_id, created_at) VALUES (%(df_policy_id)s, %(policy_number)s, %(df_policy_status_id)s, %(source_policy_status)s, %(product_id)s, %(df_agency_id)s, %(df_agency_contact_id)s, %(df_customer_id)s, %(policy_issue_date)s, %(df_source_system_id)s, %(created_at)s)]
+[parameters: {'df_policy_id': 'b4e6fc2e-de43-5631-a1f0-92c53fa81477', 'policy_number': 120214309.0, 'df_policy_status_id': 4, 'source_policy_status': 'T', 'product_id': None, 'df_agency_id': None, 'df_agency_contact_id': None, 'df_customer_id': None, 'policy_issue_date': None, 'df_source_system_id': 12, 'created_at': datetime.datetime(2025, 12, 1, 17, 53, 6, 371349)}]
+(Background on this error at: https://sqlalche.me/e/20/gkpj)
+Traceback (most recent call last):
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1963, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\engine\default.py", line 943, in do_execute
+    cursor.execute(statement, parameters)
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\cursors.py", line 153, in execute
+    result = self._query(query)
+             ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\cursors.py", line 322, in _query
+    conn.query(q)
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\connections.py", line 563, in query
+    self._affected_rows = self._read_query_result(unbuffered=unbuffered)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\connections.py", line 825, in _read_query_result
+    result.read()
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\connections.py", line 1199, in read
+    first_packet = self.connection._read_packet()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\connections.py", line 775, in _read_packet
+    packet.raise_for_error()
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\protocol.py", line 219, in raise_for_error
+    err.raise_mysql_exception(self._data)
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\err.py", line 150, in raise_mysql_exception
+    raise errorclass(errno, errval)
+pymysql.err.IntegrityError: (1048, "Column 'product_id' cannot be null")
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\src\handler.py", line 481, in <module>
+    handle({'Records': [{'body': '{"source_policy_id":"120214309","source_system":"as400_aff"}'}]}, None)
+  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\src\handler.py", line 475, in handle
+    asyncio.run(consume_lambda(config=payload))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\src\handler.py", line 461, in consume_lambda
+    raise e
+  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\src\handler.py", line 397, in consume_lambda
+    session.commit()
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2032, in commit
+    trans.commit(_to_root=True)
+  File "<string>", line 2, in commit
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1313, in commit
+    self._prepare_impl()
+  File "<string>", line 2, in _prepare_impl
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1288, in _prepare_impl
+    self.session.flush()
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\orm\session.py", line 4345, in flush
+    self._flush(objects)
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\orm\session.py", line 4480, in _flush
+    with util.safe_reraise():
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 224, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\orm\session.py", line 4441, in _flush
+    flush_context.execute()
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\orm\unitofwork.py", line 466, in execute
+    rec.execute(self)
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\orm\unitofwork.py", line 642, in execute
+    util.preloaded.orm_persistence.save_obj(
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\orm\persistence.py", line 93, in save_obj
+    _emit_insert_statements(
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\orm\persistence.py", line 1048, in _emit_insert_statements
+    result = connection.execute(
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1415, in execute
+    return meth(
+           ^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\sql\elements.py", line 523, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1637, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1842, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1982, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2351, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1963, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\sqlalchemy\engine\default.py", line 943, in do_execute
+    cursor.execute(statement, parameters)
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\cursors.py", line 153, in execute
+    result = self._query(query)
+             ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\cursors.py", line 322, in _query
+    conn.query(q)
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\connections.py", line 563, in query
+    self._affected_rows = self._read_query_result(unbuffered=unbuffered)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\connections.py", line 825, in _read_query_result
+    result.read()
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\connections.py", line 1199, in read
+    first_packet = self.connection._read_packet()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\connections.py", line 775, in _read_packet
+    packet.raise_for_error()
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\protocol.py", line 219, in raise_for_error
+    err.raise_mysql_exception(self._data)
+  File "C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_policynumberversionconsumer\venv\Lib\site-packages\pymysql\err.py", line 150, in raise_mysql_exception
+    raise errorclass(errno, errval)
+sqlalchemy.exc.IntegrityError: (pymysql.err.IntegrityError) (1048, "Column 'product_id' cannot be null")
+[SQL: INSERT INTO policy (df_policy_id, policy_number, df_policy_status_id, source_policy_status, product_id, df_agency_id, df_agency_contact_id, df_customer_id, policy_issue_date, df_source_system_id, created_at) VALUES (%(df_policy_id)s, %(policy_number)s, %(df_policy_status_id)s, %(source_policy_status)s, %(product_id)s, %(df_agency_id)s, %(df_agency_contact_id)s, %(df_customer_id)s, %(policy_issue_date)s, %(df_source_system_id)s, %(created_at)s)]
+[parameters: {'df_policy_id': 'b4e6fc2e-de43-5631-a1f0-92c53fa81477', 'policy_number': 120214309.0, 'df_policy_status_id': 4, 'source_policy_status': 'T', 'product_id': None, 'df_agency_id': None, 'df_agency_contact_id': None, 'df_customer_id': None, 'policy_issue_date': None, 'df_source_system_id': 12, 'created_at': datetime.datetime(2025, 12, 1, 17, 53, 6, 371349)}]
+(Background on this error at: https://sqlalche.me/e/20/gkpj)
