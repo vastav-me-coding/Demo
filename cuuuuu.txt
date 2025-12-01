@@ -459,6 +459,32 @@ sqlalchemy.exc.IntegrityError: (pymysql.err.IntegrityError) (1452, 'Cannot add o
 
 
 
+class Line_Item(Base, todictclass):
+    __tablename__ = 'line_item'
+
+    df_line_item_id = Column(CHAR(36), primary_key=True)
+    df_invoice_id = Column(CHAR(36), ForeignKey('invoice.df_invoice_id'))
+    df_line_item_type_id = Column(Integer, ForeignKey('line_item_type.df_line_item_type_id'))
+    source_line_item_id = Column(String(128))
+    source_line_item_type = Column(String(64))
+    description = Column(String(256))
+    amount = Column(DECIMAL(18, 5))
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    invoice = relationship('Invoice')
+    line_item_type = relationship('Line_Item_Type')
+    source_system = relationship('Source_System')
+
+class Line_Item_Type(Base, todictclass):
+    __tablename__ = 'line_item_type'
+
+    df_line_item_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    line_item_type = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
 
 
 
