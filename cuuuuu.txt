@@ -252,3 +252,9 @@ def handle(event, context):
 #         ]
 #     }
 #     handle(test_event, None)
+
+
+
+
+{'source_invoice_id': '461562702-20010525-853259', 'source_line_item_id': '461562702-20010525-853259_bp', 'source_line_item_type': 'base_premium', 'description': 'Base Premium', 'amount': 89.0}
+handle({"Records": [{"body": '{"source_line_item_id":"461561106","source_system":"as400_aff"}'}]}, None)
