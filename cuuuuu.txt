@@ -1,34 +1,232 @@
+Handle function is called
+STEP 1: consume_lambda_line_item started
+STEP 2: Processing configs...
+STEP 2.1: Processing line_item=472191937, source_system=as400_aff
+AS400 Line Items: [{'source_invoice_id': '472191937-20210925-781824', 'source_line_item_id': '472191937-20210925-781824_bp', 'source_line_item_type': 'base_premium', 'description': 'Base Premium', 'amount': 35.0}, {'source_invoice_id': '472191937-20210925-781824', 'source_line_item_id': '472191937-20210925-781824_tax', 'source_line_item_type': 'tax', 'description': 'Tax', 'amount': 0.0}, {'source_invoice_id': '472191937-20210925-781824', 'source_line_item_id': '472191937-20210925-781824_ca', 'source_line_item_type': 'commission_amount', 'description': 'Commission Amount', 'amount': 14.0}, {'source_invoice_id': '472191937-20210925-781824', 'source_line_item_id': '472191937-20210925-781824_dis', 'source_line_item_type': 'discount', 'description': 'Discount', 'amount': nan}]
+AS400 Line Item: {'source_invoice_id': '472191937-20210925-781824', 'source_line_item_id': '472191937-20210925-781824_bp', 'source_line_item_type': 'base_premium', 'description': 'Base Premium', 'amount': 35.0}
+Invoice already exists with df_invoice_id e86e197d-9c18-55d5-822c-4dc1175c9317
+Line_Item already exists with df_line_item_id b320ed78-46be-598c-b59e-64f6cc0f2ce9
+Updated existing Line_Item b320ed78-46be-598c-b59e-64f6cc0f2ce9
+AS400 Line Item: {'source_invoice_id': '472191937-20210925-781824', 'source_line_item_id': '472191937-20210925-781824_tax', 'source_line_item_type': 'tax', 'description': 'Tax', 'amount': 0.0}
+Invoice already exists with df_invoice_id e86e197d-9c18-55d5-822c-4dc1175c9317
+Line_Item already exists with df_line_item_id 18d777bd-1fd9-56dc-ad47-051b24f8fe43
+Updated existing Line_Item 18d777bd-1fd9-56dc-ad47-051b24f8fe43
+AS400 Line Item: {'source_invoice_id': '472191937-20210925-781824', 'source_line_item_id': '472191937-20210925-781824_ca', 'source_line_item_type': 'commission_amount', 'description': 'Commission Amount', 'amount': 14.0}       
+Invoice already exists with df_invoice_id e86e197d-9c18-55d5-822c-4dc1175c9317
+IUnside if &&&&&&&&&&&&&&&&&&&&********************************************
+{'source_invoice_id': '472191937-20210925-781824', 'source_line_item_id': '472191937-20210925-781824_ca', 'source_line_item_type': 'commission_amount', 'description': 'Commission Amount', 'amount': 14.0, 'df_source_system_id': 12, 'df_invoice_id': 'e86e197d-9c18-55d5-822c-4dc1175c9317', 'df_line_item_type_id': None, 'df_line_item_id': 'a0b58037-784f-57dd-9f60-5222fd78878b'}
+IUnside if &&&&&&&&&&&&&&&&&&&&********************************************
+a0b58037-784f-57dd-9f60-5222fd78878b
+IUnside if &&&&&&&&&&&&&&&&&&&&********************************************
+Inserted new Line_Item 472191937 with df_line_item_id a0b58037-784f-57dd-9f60-5222fd78878b
+AS400 Line Item: {'source_invoice_id': '472191937-20210925-781824', 'source_line_item_id': '472191937-20210925-781824_dis', 'source_line_item_type': 'discount', 'description': 'Discount', 'amount': nan}
+Invoice already exists with df_invoice_id e86e197d-9c18-55d5-822c-4dc1175c9317
+IUnside if &&&&&&&&&&&&&&&&&&&&********************************************
+{'source_invoice_id': '472191937-20210925-781824', 'source_line_item_id': '472191937-20210925-781824_dis', 'source_line_item_type': 'discount', 'description': 'Discount', 'amount': nan, 'df_source_system_id': 12, 'df_invoice_id': 'e86e197d-9c18-55d5-822c-4dc1175c9317', 'df_line_item_type_id': 3, 'df_line_item_id': '86a63858-d202-5e87-b6dd-c8470bda24b2'}
+IUnside if &&&&&&&&&&&&&&&&&&&&********************************************
+86a63858-d202-5e87-b6dd-c8470bda24b2
+IUnside if &&&&&&&&&&&&&&&&&&&&********************************************
+[DB ERROR] (pymysql.err.ProgrammingError) nan can not be used with MySQL
+[SQL: INSERT INTO line_item (df_line_item_id, df_invoice_id, df_line_item_type_id, source_line_item_id, source_line_item_type, description, amount, df_source_system_id) VALUES (%(df_line_item_id)s, %(df_invoice_id)s, %(df_line_item_type_id)s, %(source_line_item_id)s, line_item.source_line_item_type, %(description)s, %(amount)s, %(df_source_system_id)s)]
+[parameters: {'df_line_item_id': '86a63858-d202-5e87-b6dd-c8470bda24b2', 'df_invoice_id': 'e86e197d-9c18-55d5-822c-4dc1175c9317', 'df_line_item_type_id': 3, 'source_line_item_id': '472191937-20210925-781824_dis', 'description': 'Discount', 'amount': nan, 'df_source_system_id': 12}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Traceback (most recent call last):
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1963, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py", line 943, in do_execute
+    cursor.execute(statement, parameters)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 151, in execute
+    query = self.mogrify(query, args)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 129, in mogrify
+    query = query % self._escape_args(args, conn)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 104, in _escape_args
+    return {key: conn.literal(val) for (key, val) in args.items()}
+                 ^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 530, in literal
+    return self.escape(obj, self.encoders)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 523, in escape
+    return converters.escape_item(obj, self.charset, mapping=mapping)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\converters.py", line 25, in escape_item
+    val = encoder(val, mapping)
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\converters.py", line 56, in escape_float
+    raise ProgrammingError("%s can not be used with MySQL" % s)
+pymysql.err.ProgrammingError: nan can not be used with MySQL
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 725, in <module>
+    handle({"Records": [{"body": '{"source_line_item_id":"472191937","source_system":"as400_aff"}'}]}, None)
+  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 720, in handle
+    asyncio.run(consume_lambda(config=payload))
+  File "C:\Program Files\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\asyncio\base_events.py", line 685, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 712, in consume_lambda
+    raise e
+  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 699, in consume_lambda
+    session.commit()
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 2032, in commit
+    trans.commit(_to_root=True)
+  File "<string>", line 2, in commit
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 1313, in commit
+    self._prepare_impl()
+  File "<string>", line 2, in _prepare_impl
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 1288, in _prepare_impl
+    self.session.flush()
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 4345, in flush
+    self._flush(objects)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 4480, in _flush
+    with util.safe_reraise():
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\util\langhelpers.py", line 224, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 4441, in _flush
+    flush_context.execute()
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\unitofwork.py", line 466, in execute
+    rec.execute(self)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\unitofwork.py", line 642, in execute
+    util.preloaded.orm_persistence.save_obj(
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\persistence.py", line 93, in save_obj
+    _emit_insert_statements(
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\persistence.py", line 1227, in _emit_insert_statements
+    result = connection.execute(
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1415, in execute
+    return meth(
+           ^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\elements.py", line 523, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1637, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1842, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1982, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 2351, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1963, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py", line 943, in do_execute
+    cursor.execute(statement, parameters)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 151, in execute
+    query = self.mogrify(query, args)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 129, in mogrify
+    query = query % self._escape_args(args, conn)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 104, in _escape_args
+    return {key: conn.literal(val) for (key, val) in args.items()}
+                 ^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 530, in literal
+    return self.escape(obj, self.encoders)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 523, in escape
+    return converters.escape_item(obj, self.charset, mapping=mapping)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\converters.py", line 25, in escape_item
+    val = encoder(val, mapping)
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\converters.py", line 56, in escape_float
+    raise ProgrammingError("%s can not be used with MySQL" % s)
+sqlalchemy.exc.ProgrammingError: (pymysql.err.ProgrammingError) nan can not be used with MySQL
+[SQL: INSERT INTO line_item (df_line_item_id, df_invoice_id, df_line_item_type_id, source_line_item_id, source_line_item_type, description, amount, df_source_system_id) VALUES (%(df_line_item_id)s, %(df_invoice_id)s, %(df_line_item_type_id)s, %(source_line_item_id)s, line_item.source_line_item_type, %(description)s, %(amount)s, %(df_source_system_id)s)]
+[parameters: {'df_line_item_id': '86a63858-d202-5e87-b6dd-c8470bda24b2', 'df_invoice_id': 'e86e197d-9c18-55d5-822c-4dc1175c9317', 'df_line_item_type_id': 3, 'source_line_item_id': '472191937-20210925-781824_dis', 'description': 'Discount', 'amount': nan, 'df_source_system_id': 12}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+(venv) PS C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer> 
+
+
+
+
+
+
+
+
+
+
+
+
 import os
 import json
 import time
+import logging
 import pandas as pd
 import asyncio
 from datetime import datetime
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import func, and_,select, BIGINT, create_engine, Column, update, Integer, cast, String, MetaData, DateTime, Float, Text, DECIMAL, TIMESTAMP, text
-from sqlalchemy.orm import Session, declarative_base
+
 from df_database_models.db_conn import get_rds_db_session, get_as400_db_session
-from df_database_models.models import (
-    Customer_Contact, Customer, Source_System
-)
+from df_database_models.models import Line_Item, Line_Item_Type, Invoice, Source_System, Invoice_Status
 from df_database_models.db_utils import (
     generate_uuid, convert_timestamps, query_update_dict, get_record, multi_filter_get_record
 )
 from secrets_manager import get_secret
 from adf_pyutils.clm_wrapper import common_logger
 
-# ... (rest of env vars as before)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+
+
+os.environ["AWS_REGION"] = "us-east-1"
+
+os.environ['RDS_DB_NAME'] = "pnc_warehouse"
+os.environ['RDS_REF_DB_NAME'] = "ref_data"
+os.environ['RDS_RAW_DB_NAME'] = "mdm_raw"
+os.environ['RDS_REFINED_DB_NAME'] = "mdm_refined"
+
+os.environ['AS400_AFF_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-azsql-affpmsqc-credentials-secret-XJspXZ"
+os.environ['AS400_KKINS_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-azsql-kkinsqc-credentials-secret-KThAVI"
+os.environ['AUMINE_AFF_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-audbm-affods-credentials-secret-vclZk7"
+os.environ['AUMINE_AUM_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-audbm-aumods-credentials-secret-tOkXG3"
+
+os.environ['RDS_HOST'] = "affinity-ods2-develop.cluster-cj3qp6qspcpk.us-east-1.rds.amazonaws.com"
+os.environ['RDS_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-ods2-ar4262-dv001-rds-master-credentials-169S6S"
+os.environ['SQS_POLICY_UPDATE_URL'] = "https://6ekyb6mh5sxa3wpf3waq7ckvy40gckvy.lambda-url.us-east-1.on.aws/policy-update"
+os.environ['SQS_PRODUCER_SECRET_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-tds-sqs-producer-v2-credentials-Cna5zK"
 
 pnc_db = os.environ['RDS_DB_NAME']
 ref_db = os.environ['RDS_REF_DB_NAME']
 mdm_raw_db = os.environ['RDS_RAW_DB_NAME']
 mdm_refined_db = os.environ['RDS_REFINED_DB_NAME']
 
+# --- Env DB Configs ---
+os.environ["AWS_REGION"] = "us-east-1"
+os.environ['RDS_DB_NAME'] = "pnc_warehouse"
+os.environ['RDS_REF_DB_NAME'] = "ref_data"
+os.environ['RDS_RAW_DB_NAME'] = "mdm_raw"
+os.environ['RDS_REFINED_DB_NAME'] = "mdm_refined"
+
+# --- Env DB Configs ---
+pnc_db = os.environ['RDS_DB_NAME']
+ref_db = os.environ['RDS_REF_DB_NAME']
+mdm_raw_db = os.environ['RDS_RAW_DB_NAME']
+mdm_refined_db = os.environ['RDS_REFINED_DB_NAME']
+
+
 # --- Async Logger Wrapper ---
 async def log_msg(func, **kwargs):
     await asyncio.to_thread(func, **kwargs)
 
-# (msg_to_sqs and init_sp unchanged for brevity)
 
 # --- Session/Engine Initializer ---
 def call_session_engine(source_system=None, database_name=None):
@@ -56,6 +254,11 @@ def call_session_engine(source_system=None, database_name=None):
         as400_engine = get_as400_db_session(as400_secret_name, region_name)
         return as400_engine
 
+    elif source_system and source_system.lower() == 'as400_attorney':
+        as400_secret_name = os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+        as400_engine = get_as400_db_session(as400_secret_name, region_name)
+        return as400_engine
+
     if database_name:
         session = get_rds_db_session(rds_secret_name, region_name, rds_host_nm, rds_db_nm)
         return session
@@ -68,61 +271,421 @@ as400_engine_kkins = call_session_engine(source_system='as400_kkins')
 as400_engine_attorney = call_session_engine(source_system='as400_attorney')
 
 
-# --- Lookup Customer from AS400 ---
-def lookup_as400_customer_contact(config=None, id=None):
-    """
-    Query AS400 systems (AFF / KKINS) for customer record.
-    You can adjust the column mappings as per AS400 schema.
-    """
+# --- Lookup LineItem from AS400 ---
+def lookup_as400_lineitem(config=None, id=None):
     source_system = config.get("source_system")
     df = None
 
     if source_system and source_system.lower() == "as400_aff":
         df = pd.read_sql(f"""
-            SELECT DISTINCT CASt(NULL AS varchar(36)) AS df_customer_contact_id,
-            cu.CUSKEY AS source_customer_contact_id,
-            CAST(NULL AS varchar(36)) AS df_customer_id,
-            CAST(NULL AS varchar(36)) AS df_source_system_id,
-            CAST(NULL AS varchar(36)) AS mdm_customer_id,
-            CAST(NULL AS timestamp) AS created_date,
-            CAST(NULL AS timestamp) AS modified_date
-            FROM ADGDTADV.NSOCVGP AS pol
-            INNER JOIN ADGDTADV.HCPCSTP AS cust ON pol.customer_no = cust.CUSTNO
-            INNER JOIN ADGDTADV.HCPCUSP cu ON cust.CSTKEY = cu.CUSKEY
-            WHERE pol.POLICY_TYPE = 'I' and cu.CUSKEY = {id};
+            WITH unioned AS (
+            SELECT 
+                main.source_invoice_id,
+                main.source_invoice_id + '_bp' AS source_line_item_id,
+                'base_premium' AS source_line_item_type,
+                'Base Premium' AS description,
+                main.BASE_PREMIUM AS amount
+            FROM (
+                SELECT DISTINCT 
+                    da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
+                    cov.BASE_PREMIUM,
+                    cov.TAX,
+                    da.commission_amount,
+                    CASE 
+                        WHEN ds.total_discount != 0 THEN ds.total_discount
+                        WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
+                        ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
+                    END AS Discount
+                FROM 
+                    (
+                        SELECT DISTINCT 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                            INVOICE_NO,
+                            SUM(PREMIUM) AS premium,
+                            SUM(commission_amount) AS commission_amount,
+                            CASE	
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
+                                    THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                            END AS effective_date 
+                        FROM 
+                            ADGDTADV.U__ARFILE
+                        GROUP BY 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                            INVOICE_NO,
+                            EFFECTIVE_DATE_6
+                    ) AS da
+                INNER JOIN 
+                    (
+                        SELECT 
+                            CUSTOMER_NO,
+                            EFFECTIVE_DATE,
+                            ACCOUNT_NO,
+                            BASE_PREMIUM,
+                            TOTAL_PREMIUM,
+                            POLICY_EFF_DATE,
+                            INVOICE_NO,
+                            (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
+                            LAST_PAYMENT_DATE
+                        FROM ADGDTADV.NSOCVGP
+                    ) AS cov 
+                    ON cov.CUSTOMER_NO = da.customer_number 
+                    AND cov.EFFECTIVE_DATE = da.effective_date
+                    AND cov.INVOICE_NO = da.invoice_no
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            GRCUST AS customer_no,
+                            GRDISP AS discount_percentage,
+                            GRPEFF AS effective_date,
+                            GRSEQN AS seq_no
+                        FROM ADGDTADV.HCPGRDCP
+                    ) AS dis
+                    ON dis.customer_no = da.customer_number 
+                    AND dis.effective_date = da.effective_date
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            customer_number,
+                            cvg_effective_date AS effective_date,
+                            total_discount
+                        FROM ADGDTADV.ADGDSRP
+                    ) AS ds
+                    ON ds.customer_number = da.customer_number 
+                    AND ds.effective_date = da.effective_date
+            ) AS main
+            UNION ALL
+            SELECT 
+                main.source_invoice_id,
+                main.source_invoice_id + '_tax' AS source_line_item_id,
+                'tax' AS source_line_item_type,
+                'Tax' AS description,
+                main.TAX AS amount
+            FROM (
+                -- Repeat the same subquery as above for each UNION ALL
+                SELECT DISTINCT 
+                    da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
+                    cov.BASE_PREMIUM,
+                    cov.TAX,
+                    da.commission_amount,
+                    CASE 
+                        WHEN ds.total_discount != 0 THEN ds.total_discount
+                        WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
+                        ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
+                    END AS Discount
+                FROM 
+                    (
+                        SELECT DISTINCT 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                            INVOICE_NO,
+                            SUM(PREMIUM) AS premium,
+                            SUM(commission_amount) AS commission_amount,
+                            CASE	
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
+                                    THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                            END AS effective_date 
+                        FROM 
+                            ADGDTADV.U__ARFILE
+                        GROUP BY 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                            INVOICE_NO,
+                            EFFECTIVE_DATE_6
+                    ) AS da
+                INNER JOIN 
+                    (
+                        SELECT 
+                            CUSTOMER_NO,
+                            EFFECTIVE_DATE,
+                            ACCOUNT_NO,
+                            BASE_PREMIUM,
+                            TOTAL_PREMIUM,
+                            POLICY_EFF_DATE,
+                            INVOICE_NO,
+                            (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
+                            LAST_PAYMENT_DATE
+                        FROM ADGDTADV.NSOCVGP
+                    ) AS cov 
+                    ON cov.CUSTOMER_NO = da.customer_number 
+                    AND cov.EFFECTIVE_DATE = da.effective_date
+                    AND cov.INVOICE_NO = da.invoice_no
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            GRCUST AS customer_no,
+                            GRDISP AS discount_percentage,
+                            GRPEFF AS effective_date,
+                            GRSEQN AS seq_no
+                        FROM ADGDTADV.HCPGRDCP
+                    ) AS dis
+                    ON dis.customer_no = da.customer_number 
+                    AND dis.effective_date = da.effective_date
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            customer_number,
+                            cvg_effective_date AS effective_date,
+                            total_discount
+                        FROM ADGDTADV.ADGDSRP
+                    ) AS ds
+                    ON ds.customer_number = da.customer_number 
+                    AND ds.effective_date = da.effective_date
+            ) AS main
+            UNION ALL
+            SELECT 
+                main.source_invoice_id,
+                main.source_invoice_id + '_ca' AS source_line_item_id,
+                'commission_amount' AS source_line_item_type,
+                'Commission Amount' AS description,
+                main.commission_amount AS amount
+            FROM (
+                -- Repeat the same subquery as above for each UNION ALL
+                SELECT DISTINCT 
+            da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
+                    cov.BASE_PREMIUM,
+                    cov.TAX,
+                    da.commission_amount,
+                    CASE 
+                        WHEN ds.total_discount != 0 THEN ds.total_discount
+                        WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
+                        ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
+                    END AS Discount
+                FROM 
+                    (
+                        SELECT DISTINCT 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                            INVOICE_NO,
+                            SUM(PREMIUM) AS premium,
+                            SUM(commission_amount) AS commission_amount,
+                            CASE	
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
+                                    THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                            END AS effective_date 
+                        FROM 
+                            ADGDTADV.U__ARFILE
+                        GROUP BY 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                            INVOICE_NO,
+                            EFFECTIVE_DATE_6
+                    ) AS da
+                INNER JOIN 
+                    (
+                        SELECT 
+                            CUSTOMER_NO,
+                            EFFECTIVE_DATE,
+                            ACCOUNT_NO,
+                            BASE_PREMIUM,
+                            TOTAL_PREMIUM,
+                            POLICY_EFF_DATE,
+                            INVOICE_NO,
+                            (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
+                            LAST_PAYMENT_DATE
+                        FROM ADGDTADV.NSOCVGP
+                    ) AS cov 
+                    ON cov.CUSTOMER_NO = da.customer_number 
+                    AND cov.EFFECTIVE_DATE = da.effective_date
+                    AND cov.INVOICE_NO = da.invoice_no
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            GRCUST AS customer_no,
+                            GRDISP AS discount_percentage,
+                            GRPEFF AS effective_date,
+                            GRSEQN AS seq_no
+                        FROM ADGDTADV.HCPGRDCP
+                    ) AS dis
+                    ON dis.customer_no = da.customer_number 
+                    AND dis.effective_date = da.effective_date
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            customer_number,
+                            cvg_effective_date AS effective_date,
+                            total_discount
+                        FROM ADGDTADV.ADGDSRP
+                    ) AS ds
+                    ON ds.customer_number = da.customer_number 
+                    AND ds.effective_date = da.effective_date
+            ) AS main
+            UNION ALL
+            SELECT 
+                main.source_invoice_id,
+                main.source_invoice_id + '_dis' AS source_line_item_id,
+                'discount' AS source_line_item_type,
+                'Discount' AS description,
+                main.Discount AS amount
+            FROM (
+                -- Repeat the same subquery as above for each UNION ALL
+                SELECT DISTINCT 
+                    da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
+                    cov.BASE_PREMIUM,
+            cov.TAX,
+                    da.commission_amount,
+                    CASE 
+                        WHEN ds.total_discount != 0 THEN ds.total_discount
+                        WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
+                        ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
+                    END AS Discount
+                FROM 
+                    (
+                        SELECT DISTINCT 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                            INVOICE_NO,
+                            SUM(PREMIUM) AS premium,
+                            SUM(commission_amount) AS commission_amount,
+                            CASE	
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
+                                    THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                            END AS effective_date 
+                        FROM 
+                            ADGDTADV.U__ARFILE
+                        GROUP BY 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                            INVOICE_NO,
+                            EFFECTIVE_DATE_6
+                    ) AS da
+                INNER JOIN 
+                    (
+                        SELECT 
+                            CUSTOMER_NO,
+                            EFFECTIVE_DATE,
+                            ACCOUNT_NO,
+                            BASE_PREMIUM,
+                            TOTAL_PREMIUM,
+                            POLICY_EFF_DATE,
+                            INVOICE_NO,
+                            (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
+                            LAST_PAYMENT_DATE
+                        FROM ADGDTADV.NSOCVGP
+                    ) AS cov 
+                    ON cov.CUSTOMER_NO = da.customer_number 
+                    AND cov.EFFECTIVE_DATE = da.effective_date
+                    AND cov.INVOICE_NO = da.invoice_no
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            GRCUST AS customer_no,
+                            GRDISP AS discount_percentage,
+                            GRPEFF AS effective_date,
+                            GRSEQN AS seq_no
+                        FROM ADGDTADV.HCPGRDCP
+                    ) AS dis
+                    ON dis.customer_no = da.customer_number 
+                    AND dis.effective_date = da.effective_date
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            customer_number,
+                            cvg_effective_date AS effective_date,
+                            total_discount
+                        FROM ADGDTADV.ADGDSRP
+                    ) AS ds
+                    ON ds.customer_number = da.customer_number 
+                    AND ds.effective_date = da.effective_date
+            ) AS main)
+            SELECT *
+            FROM unioned
+            WHERE source_invoice_id LIKE '{id}%';
         """, con=as400_engine_aff)
 
     elif source_system and source_system.lower() == "as400_kkins":
+        # Example query for kkins, adjust as per schema
         df = pd.read_sql(f"""
-            SELECT DISTINCT
-                C.CUST_NO AS source_customer_id,
-                C.CUST_NAME AS customer_name,
-                C.DBA_NAME AS dba_name,
-                C.TAX_ID AS tax_number,
-                C.EMAIL AS email,
-                C.ADDR1 AS premises_address_line_1,
-                C.CITY AS premises_city,
-                C.STATE AS premises_state,
-                C.ZIP AS premises_zip,
-                C.PHONE AS premises_phone,
-                C.STATUS AS status,
-                C.CREATED_TS AS created_ts,
-                C.UPDATED_TS AS modified_ts
-            FROM KKINSDB.CUSTOMER C
-            WHERE C.CUST_NO = '{id}'
+                SELECT DISTINCT 
+                f0.QBDOC AS source_invoice_id,
+                f0.QBDOC AS invoice_number,
+                (f0.QB$CMP||f0.QB$PFX||f0.QB$NBR||f0.QB$SFX) AS transaction_id,
+                f11.RPRMK AS description,
+                f11.RPAG AS amount,
+                f11.RPRP1 AS source_line_item_type,
+                CASE WHEN f11.RPRP1 = 'P' THEN 'Base Premium'
+                    WHEN f11.RPRP1 = 'S' THEN 'Commission'
+                    WHEN f11.RPRP1 = 'N' AND lower(f11.RPRMK) LIKE '%tax%' THEN 'Tax'
+                    WHEN f11.RPRP1 = 'N' AND lower(f11.RPRMK) LIKE '%disc%' THEN 'Discount'
+                    WHEN f11.RPRP1 = 'N' AND (lower(f11.RPRMK) LIKE '%fee%' OR lower(f11.RPRMK) LIKE '%surplus%') THEN 'Fee'
+                    WHEN f11.RPRP1 = 'N' AND (lower(f11.RPRMK) LIKE '%surc%' OR lower(f11.RPRMK) LIKE '%assess%' ) THEN 'surcharge'
+                    ELSE NULL END AS line_item_type
+                FROM SLEDTA.F55300 AS f0
+                JOIN SLEDTA.F0311 AS f11 ON f11.RPDOC = f0.QBDOC
+                WHERE  TRIM(RPDCTM) = '' AND RPDMTJ = 0 
+
+
+                ---------------------------------
+
+
+
+
+                SELECT DISTINCT 
+                    f0.QBDOC AS source_invoice_id,
+                    f0.QBDOC AS invoice_number,
+                    (f0.QB$PCD||'-'||f0.QB$CMP||'-'||f0.QB$PFX||'-'||f0.QB$NBR||'-'||f0.QB$SFX||'-'||f0.QB$END) AS transaction_id,
+                    f11.RPRMK AS description,
+                    f11.RPAG AS amount,
+                    f11.RPRP1 AS source_line_item_type,
+                    CASE 
+                        WHEN f11.RPRP1 = 'P' THEN 'Base Premium'
+                        WHEN f11.RPRP1 = 'S' THEN 'Commission'
+                        WHEN f11.RPRP1 = 'N' AND lower(f11.RPRMK) LIKE '%tax%' THEN 'Tax'
+                        WHEN f11.RPRP1 = 'N' AND lower(f11.RPRMK) LIKE '%disc%' THEN 'Discount'
+                        WHEN f11.RPRP1 = 'N' AND (lower(f11.RPRMK) LIKE '%fee%' OR lower(f11.RPRMK) LIKE '%surplus%') THEN 'Fee'
+                        WHEN f11.RPRP1 = 'N' AND (lower(f11.RPRMK) LIKE '%surc%' OR lower(f11.RPRMK) LIKE '%assess%' ) THEN 'Surcharge'
+                        ELSE NULL 
+                    END AS line_item_type
+                FROM SLEDTA.F55300 AS f0
+                JOIN SLEDTA.F0311 AS f11 ON f11.RPDOC = f0.QBDOC
+                WHERE TRIM(RPDCTM) = '' 
+                AND RPDMTJ = 0
+                AND f0.QBDOC = '{id}'
+                AND (
+                        (f11.RPRP1 = 'P')
+                        OR (f11.RPRP1 = 'S')
+                        OR (f11.RPRP1 = 'N' AND (
+                            lower(f11.RPRMK) LIKE '%tax%' 
+                            OR lower(f11.RPRMK) LIKE '%disc%'
+                            OR lower(f11.RPRMK) LIKE '%fee%' 
+                            OR lower(f11.RPRMK) LIKE '%surplus%'
+                            OR lower(f11.RPRMK) LIKE '%surc%' 
+                            OR lower(f11.RPRMK) LIKE '%assess%'
+                        ))
+                    )
         """, con=as400_engine_kkins)
 
     if df is not None and len(df) > 0:
-        return df.to_dict("records")[0]
+        return df.to_dict("records")
     return None
 
-# --- Core Consumer ---
+# --------------------------------------------------------------------
+# Core Consumer for Line Item
+# --------------------------------------------------------------------
+# Core Line Item Consumer (async)
 async def consume_lambda(config=None):
-    print("STEP 1: consume_lambda started")
+    print("STEP 1: consume_lambda_line_item started")
     start_timestamp = datetime.timestamp(datetime.now())
 
     try:
-        # Parse configs
+        # normalize config(s) into list
         if isinstance(config, dict):
             config_list = [config]
         elif isinstance(config, list):
@@ -135,98 +698,179 @@ async def consume_lambda(config=None):
         print("STEP 2: Processing configs...")
 
         for config_dict in config_list:
-            contact_id = config_dict.get("source_customer_contact_id")
+            source_line_item_id = config_dict.get("source_line_item_id")
             source_system = config_dict.get("source_system", "").lower()
 
-            print(f"STEP 2.1: Processing contact_id={contact_id}, source_system={source_system}")
+            print(f"STEP 2.1: Processing line_item={source_line_item_id}, source_system={source_system}")
 
-            # AS400 Lookup
-            as400_engine = as400_engine_aff if source_system == "as400_aff" else as400_engine_kkins
-            as400_contact = lookup_as400_customer_contact(config_dict, contact_id)
-            print("AS400 Contact:", as400_contact)
-            if not as400_contact:
-                print(f"[ERROR] No AS400 record found for customer_contact={contact_id}")
-                continue
+            # select appropriate as400 engine & do lookup
+            # as400_engine = as400_engine_aff if source_system == "as400_aff" else as400_engine_kkins
+            as400_line_items = lookup_as400_lineitem(config_dict, source_line_item_id)
+            print("AS400 Line Items:", as400_line_items)
+            for as400_line_item in as400_line_items:
+                print("AS400 Line Item:", as400_line_item)
+                if not as400_line_item:
+                    print(f"[ERROR] No AS400 line item found for id={source_line_item_id}")
+                    continue
 
-            # --- Source_System Upsert ---
-            ss_query = multi_filter_get_record(session, model=Source_System, source_system=source_system)
-            ss_record = ss_query.first() if ss_query else None
-            if not ss_record:
-                df_source_system_id = generate_uuid(str(source_system), "SourceSystem")
-                source_system_dict = {
-                    "source_system": source_system,
-                    "df_source_system_id": df_source_system_id
-                }
-                session.add(Source_System.from_dict(cls=Source_System, d=source_system_dict))
-                session.commit()
-                print(f"Inserted new Source_System: {source_system}")
-                as400_contact["df_source_system_id"] = df_source_system_id
-            else:
-                as400_contact["df_source_system_id"] = ss_record.df_source_system_id
-
-            df_source_system_id = as400_contact["df_source_system_id"]
-
-            # --- Customer Upsert ---
-            src_customer_id = as400_contact.get("source_customer_contact_id")
-            customer_record = session.query(Customer).filter(
-                Customer.source_customer_id == src_customer_id,
-                Customer.df_source_system_id == df_source_system_id
-            ).first()
-
-            if customer_record:
-                as400_contact["df_customer_id"] = customer_record.df_customer_id
-                print(f"Customer already exists with df_customer_id {customer_record.df_customer_id}")
-            else:
-                df_customer_id = generate_uuid(str(src_customer_id or ''), str(df_source_system_id))
-                as400_contact["df_customer_id"] = df_customer_id
-
-                # Paranoia check by PK
-                existing_uuid = session.query(Customer).filter(
-                    Customer.df_customer_id == df_customer_id
-                ).first()
-                if not existing_uuid:
-                    session.add(Customer.from_dict(cls=Customer, d=as400_contact))
+                # --- Source_System Upsert ---
+                ss_query = multi_filter_get_record(session, model=Source_System, source_system=source_system)
+                ss_record = ss_query.first() if ss_query else None
+                if not ss_record:
+                    df_source_system_id = generate_uuid(str(source_system), "SourceSystem")
+                    source_system_dict = {
+                        "source_system": source_system,
+                        "df_source_system_id": df_source_system_id
+                    }
+                    session.add(Source_System.from_dict(cls=Source_System, d=source_system_dict))
                     session.commit()
-                    print(f"Inserted new customer {src_customer_id} with df_customer_id {df_customer_id}")
+                    print(f"Inserted new Source_System: {source_system}")
+                    as400_line_item["df_source_system_id"] = df_source_system_id
                 else:
-                    print(f"Customer already exists by PK with df_customer_id {existing_uuid.df_customer_id}")
-                    as400_contact["df_customer_id"] = existing_uuid.df_customer_id
+                    as400_line_item["df_source_system_id"] = ss_record.df_source_system_id
 
-            # --- Customer_Contact Upsert ---
-            contact_record = session.query(Customer_Contact).filter(
-                Customer_Contact.source_customer_contact_id == as400_contact.get("source_customer_contact_id"),
-                Customer_Contact.df_customer_id == as400_contact.get("df_customer_id"),
-                Customer_Contact.df_source_system_id == as400_contact.get("df_source_system_id")
-            ).first()
+                df_source_system_id = as400_line_item["df_source_system_id"]
 
-            if contact_record:
-                print(f"Customer_Contact already exists with df_customer_contact_id {contact_record.df_customer_contact_id}")
-                # contact_record.update(query_update_dict(obj=Customer_Contact, dict=as400_contact))
-                # session.commit()
-                print(f"Updated existing Customer_Contact {contact_record.df_customer_contact_id}")
-            else:
-                uuid_key = (
-                    str(as400_contact.get("source_customer_contact_id") or '') +
-                    str(as400_contact.get("df_customer_id") or '') +
-                    str(as400_contact.get("df_source_system_id") or '')
-                )
-                df_customer_contact_id = generate_uuid(uuid_key, str(df_source_system_id))
-                as400_contact["df_customer_contact_id"] = df_customer_contact_id
-
-                # Paranoia check by PK
-                existing_contact_uuid = session.query(Customer_Contact).filter(
-                    Customer_Contact.df_customer_contact_id == df_customer_contact_id
+                # --- Invoice Upsert ---
+                src_invoice_id = as400_line_item.get("source_invoice_id")
+                invoice_record = session.query(Invoice).filter(
+                    Invoice.source_invoice_id == src_invoice_id,
+                    Invoice.df_source_system_id == df_source_system_id
                 ).first()
-                if not existing_contact_uuid:
-                    session.add(Customer_Contact.from_dict(cls=Customer_Contact, d=as400_contact))
-                    session.commit()
-                    print(f"Inserted new Customer_Contact {contact_id} with df_customer_contact_id {df_customer_contact_id}")
+
+                if invoice_record:
+                    as400_line_item["df_invoice_id"] = invoice_record.df_invoice_id
+                    print(f"Invoice already exists with df_invoice_id {invoice_record.df_invoice_id}")
                 else:
-                    print(f"Customer_Contact already exists by PK with df_customer_contact_id {existing_contact_uuid.df_customer_contact_id}")
-                    as400_contact["df_customer_contact_id"] = existing_contact_uuid.df_customer_contact_id
+                    # generate UUID for df_invoice_id
+                    df_invoice_id = generate_uuid(str(src_invoice_id or ''), str(df_source_system_id))
+                    as400_line_item["df_invoice_id"] = df_invoice_id
+
+                    # Paranoia check by PK
+                    existing_invoice = session.query(Invoice).filter(
+                        Invoice.df_invoice_id == df_invoice_id
+                    ).first()
+
+                    if not existing_invoice:
+                        # Build a minimal invoice dict / object but ensure invoice_status exists
+                        # AS400 may not return invoice status in this row; default to 'unknown'
+                        as400_invoice = {
+                            "df_invoice_id": df_invoice_id,
+                            "source_invoice_id": src_invoice_id,
+                            "invoice_number": src_invoice_id,  # safe default; replace if you have proper number
+                            "df_transaction_id": None,
+                            "order_date": None,
+                            "total_amount_due": None,
+                            "due_date": None,
+                            "source_invoice_status": as400_line_item.get("source_invoice_status") or "unknown",
+                            "df_source_system_id": df_source_system_id
+                        }
+
+                        # --- Ensure Invoice_Status exists and set FK ---
+                        status_str = as400_invoice.get("source_invoice_status", "unknown")
+                        status_row = session.query(Invoice_Status).filter(
+                            Invoice_Status.invoice_status == status_str
+                        ).first()
+
+                        if not status_row:
+                            status_row = Invoice_Status(invoice_status=status_str)
+                            session.add(status_row)
+                            session.flush()  # get auto-incremented PK
+
+                        as400_invoice["df_invoice_status_id"] = status_row.df_invoice_status_id
+
+                        # Create Invoice ORM object explicitly to avoid mapping mistakes
+                        invoice_obj = Invoice(
+                            df_invoice_id=as400_invoice["df_invoice_id"],
+                            source_invoice_id=as400_invoice["source_invoice_id"],
+                            invoice_number=as400_invoice.get("invoice_number"),
+                            df_transaction_id=as400_invoice.get("df_transaction_id"),
+                            order_date=as400_invoice.get("order_date"),
+                            total_amount_due=as400_invoice.get("total_amount_due"),
+                            due_date=as400_invoice.get("due_date"),
+                            df_invoice_status_id=as400_invoice.get("df_invoice_status_id"),
+                            source_invoice_status=as400_invoice.get("source_invoice_status"),
+                            df_source_system_id=as400_invoice.get("df_source_system_id")
+                        )
+                        session.add(invoice_obj)
+                        # session.flush()  # make sure invoice is persisted and PKs settled
+                        session.commit()
+                        print(f"Inserted new Invoice {src_invoice_id} with df_invoice_id {df_invoice_id}")
+                    else:
+                        print(f"Invoice already exists by PK with df_invoice_id {existing_invoice.df_invoice_id}")
+                        as400_line_item["df_invoice_id"] = existing_invoice.df_invoice_id
+
+                # --- Line_Item_Type Upsert ---
+                src_line_item_type = as400_line_item.get("source_line_item_type")
+                lit_record = session.query(Line_Item_Type).filter(
+                    Line_Item_Type.line_item_type == src_line_item_type
+                    # Line_Item_Type.df_source_system_id == df_source_system_id
+                ).first()
+
+                if lit_record:
+                    as400_line_item["df_line_item_type_id"] = lit_record.df_line_item_type_id
+                else:
+                    lit_obj = Line_Item_Type(
+                        line_item_type=src_line_item_type
+                    )
+                    session.add(lit_obj)
+                    as400_line_item["df_line_item_type_id"] = lit_obj.df_line_item_type_id
+                    session.commit()
+
+
+                # --- Line_Item Upsert ---
+                contact_record = session.query(Line_Item).filter(
+                    Line_Item.source_line_item_id == as400_line_item.get("source_line_item_id"),
+                    Line_Item.df_invoice_id == as400_line_item.get("df_invoice_id"),
+                    Line_Item.df_source_system_id == as400_line_item.get("df_source_system_id")
+                ).first()
+
+                if contact_record:
+                    print(f"Line_Item already exists with df_line_item_id {contact_record.df_line_item_id}")
+                    # If you want to update existing fields, use query_update_dict or manual assignment + commit
+                    # contact_record.update(query_update_dict(obj=Line_Item, dict=as400_line_item))
+                    # session.commit()
+                    print(f"Updated existing Line_Item {contact_record.df_line_item_id}")
+                else:
+                    # create composite UUID key similar to your contact code
+                    uuid_key = (
+                        str(as400_line_item.get("source_line_item_id") or '') +
+                        str(as400_line_item.get("df_invoice_id") or '') +
+                        str(as400_line_item.get("df_source_system_id") or '')
+                    )
+                    df_line_item_id = generate_uuid(uuid_key, str(df_source_system_id))
+                    as400_line_item["df_line_item_id"] = df_line_item_id
+
+                    # Paranoia check by PK
+                    existing_line_uuid = session.query(Line_Item).filter(
+                        Line_Item.df_line_item_id == df_line_item_id
+                    ).first()
+                    if not existing_line_uuid:
+                        # Map fields that the Line_Item model expects. Add/adjust fields as per your model definition.
+                        print('IUnside if &&&&&&&&&&&&&&&&&&&&********************************************')
+                        print(as400_line_item)
+                        print('IUnside if &&&&&&&&&&&&&&&&&&&&********************************************')
+                        print(df_line_item_id)
+                        print('IUnside if &&&&&&&&&&&&&&&&&&&&********************************************')
+                        line_item_dict = {
+                            "df_line_item_id": df_line_item_id,
+                            "source_line_item_id": as400_line_item.get("source_line_item_id"),
+                            "df_invoice_id": as400_line_item.get("df_invoice_id"),
+                            "df_line_item_type_id": as400_line_item.get("df_line_item_type_id"),
+                            "df_source_system_id": as400_line_item.get("df_source_system_id"),
+                            "description": as400_line_item.get("description"),
+                            "amount": as400_line_item.get("amount"),
+                            "created_date": datetime.now()
+                        }
+                        session.add(Line_Item.from_dict(cls=Line_Item, d=line_item_dict))
+                        session.commit()
+                        print(f"Inserted new Line_Item {source_line_item_id} with df_line_item_id {df_line_item_id}")
+                    else:
+                        print(f"Line_Item already exists by PK with df_line_item_id {existing_line_uuid.df_line_item_id}")
+                        as400_line_item["df_line_item_id"] = existing_line_uuid.df_line_item_id
 
         end_timestamp = datetime.timestamp(datetime.now())
-        print(f"STEP 10: Finished ingestion. Total time: {end_timestamp - start_timestamp}s")
+        print(f"STEP 9: Finished line item ingestion. Total time: {end_timestamp - start_timestamp}s")
         return {'execution_time_sec': end_timestamp - start_timestamp}
 
     except SQLAlchemyError as e:
@@ -234,414 +878,15 @@ async def consume_lambda(config=None):
         print("[DB ERROR]", str(e))
         raise e
 
-
 # --- Lambda Handler ---
 def handle(event, context):
     start_time = time.time()
-    print("Handle function is called for customer_contact ingestion")
+    print("Handle function is called")
     for record in event['Records']:
         payload = record["body"]
         asyncio.run(consume_lambda(config=payload))
     return {"execution_time_sec": time.time() - start_time}
 
-# if __name__ == "__main__":
-#     # sample test event (adjust source_system and contact id as needed)
-#     test_event = {
-#         "Records": [
-#             {"body": '{"source_customer_contact_id":"4000341469","source_system":"as400_aff"}'}
-#         ]
-#     }
-#     handle(test_event, None)
 
-
-
-
-{'source_invoice_id': '461562702-20010525-853259', 'source_line_item_id': '461562702-20010525-853259_bp', 'source_line_item_type': 'base_premium', 'description': 'Base Premium', 'amount': 89.0}
-handle({"Records": [{"body": '{"source_line_item_id":"461561106","source_system":"as400_aff"}'}]}, None)
-
-if contact_record:
-                print(f"Line_Item already exists with df_line_item_id {contact_record.df_line_item_id}")
-                # If you want to update existing fields, use query_update_dict or manual assignment + commit
-                # contact_record.update(query_update_dict(obj=Line_Item, dict=as400_line_item))
-                # session.commit()
-                print(f"Updated existing Line_Item {contact_record.df_line_item_id}")
-            else:
-                # create composite UUID key similar to your contact code
-                uuid_key = (
-                    str(as400_line_item.get("source_line_item_id") or '') +
-                    str(as400_line_item.get("df_invoice_id") or '') +
-                    str(as400_line_item.get("df_source_system_id") or '')
-                )
-                df_line_item_id = generate_uuid(uuid_key, str(df_source_system_id))
-                as400_line_item["df_line_item_id"] = df_line_item_id
-
-                # Paranoia check by PK
-                existing_line_uuid = session.query(Line_Item).filter(
-                    Line_Item.df_line_item_id == df_line_item_id
-                ).first()
-                if not existing_line_uuid:
-                    # Map fields that the Line_Item model expects. Add/adjust fields as per your model definition.
-                    print('IUnside if &&&&&&&&&&&&&&&&&&&&********************************************')
-                    print(as400_line_item)
-                    print('IUnside if &&&&&&&&&&&&&&&&&&&&********************************************')
-                    print(df_line_item_id)
-                    print('IUnside if &&&&&&&&&&&&&&&&&&&&********************************************')
-                    line_item_dict = {
-                        "df_line_item_id": df_line_item_id,
-                        "source_line_item_id": as400_line_item.get("source_line_item_id"),
-                        "df_invoice_id": as400_line_item.get("df_invoice_id"),
-                        "df_line_item_type_id": as400_line_item.get("df_line_item_type_id"),
-                        "df_source_system_id": as400_line_item.get("df_source_system_id"),
-                        "description": as400_line_item.get("description"),
-                        "amount": as400_line_item.get("amount"),
-                        "created_date": datetime.now()
-                    }
-                    session.add(Line_Item.from_dict(cls=Line_Item, d=line_item_dict))
-                    session.commit()
-                    print(f"Inserted new Line_Item {source_line_item_id} with df_line_item_id {df_line_item_id}")
-                else:
-                    print(f"Line_Item already exists by PK with df_line_item_id {existing_line_uuid.df_line_item_id}")
-                    as400_line_item["df_line_item_id"] = existing_line_uuid.df_line_item_id
-
-
-
-[DB ERROR] (pymysql.err.IntegrityError) (1452, 'Cannot add or update a child row: a foreign key constraint fails (`pnc_warehouse`.`line_item`, CONSTRAINT `line_item_ibfk_2` FOREIGN KEY (`df_line_item_type_id`) REFERENCES `line_item_type` (`df_line_item_type_id`))')
-[SQL: INSERT INTO line_item (df_line_item_id, df_invoice_id, df_line_item_type_id, source_line_item_id, source_line_item_type, description, amount, df_source_system_id) VALUES (%(df_line_item_id)s, %(df_invoice_id)s, %(df_line_item_type_id)s, %(source_line_item_id)s, line_item.source_line_item_type, %(description)s, %(amount)s, %(df_source_system_id)s)]
-[parameters: {'df_line_item_id': 'ae773f66-3aa0-5efe-8325-3488f92c35ce', 'df_invoice_id': '222ab7b8-5969-5e78-b7c0-7874f508df5e', 'df_line_item_type_id': 'be8c5d0a-6872-5161-b13e-7e180bb833bf', 'source_line_item_id': '461562702-20010525-853259_bp', 'description': 'Base Premium', 'amount': 89.0, 'df_source_system_id': 12}]
-(Background on this error at: https://sqlalche.me/e/20/gkpj)
-Traceback (most recent call last):
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1963, in _exec_single_context
-    self.dialect.do_execute(
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py", line 943, in do_execute
-    cursor.execute(statement, parameters)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 153, in execute
-    result = self._query(query)
-             ^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 322, in _query
-    conn.query(q)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 563, in query
-    self._affected_rows = self._read_query_result(unbuffered=unbuffered)
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 825, in _read_query_result
-    result.read()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 1199, in read
-    first_packet = self.connection._read_packet()
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
-    packet.raise_for_error()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\protocol.py", line 219, in raise_for_error
-    err.raise_mysql_exception(self._data)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\err.py", line 150, in raise_mysql_exception
-    raise errorclass(errno, errval)
-pymysql.err.IntegrityError: (1452, 'Cannot add or update a child row: a foreign key constraint fails (`pnc_warehouse`.`line_item`, CONSTRAINT `line_item_ibfk_2` FOREIGN KEY (`df_line_item_type_id`) REFERENCES `line_item_type` (`df_line_item_type_id`))')
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 700, in <module>
-    handle({"Records": [{"body": '{"source_line_item_id":"461561106","source_system":"as400_aff"}'}]}, None)
-  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 695, in handle
-    asyncio.run(consume_lambda(config=payload))
-  File "C:\Program Files\Python312\Lib\asyncio\runners.py", line 194, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "C:\Program Files\Python312\Lib\asyncio\runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Program Files\Python312\Lib\asyncio\base_events.py", line 685, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 687, in consume_lambda
-    raise e
-  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 674, in consume_lambda
-    session.commit()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 2032, in commit
-    trans.commit(_to_root=True)
-  File "<string>", line 2, in commit
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
-    ret_value = fn(self, *arg, **kw)
-                ^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 1313, in commit
-    self._prepare_impl()
-  File "<string>", line 2, in _prepare_impl
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
-    ret_value = fn(self, *arg, **kw)
-                ^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 1288, in _prepare_impl
-    self.session.flush()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 4345, in flush
-    self._flush(objects)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 4480, in _flush
-    with util.safe_reraise():
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\util\langhelpers.py", line 224, in __exit__
-    raise exc_value.with_traceback(exc_tb)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 4441, in _flush
-    flush_context.execute()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\unitofwork.py", line 466, in execute
-    rec.execute(self)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\unitofwork.py", line 642, in execute
-    util.preloaded.orm_persistence.save_obj(
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\persistence.py", line 93, in save_obj
-    _emit_insert_statements(
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\persistence.py", line 1227, in _emit_insert_statements
-    result = connection.execute(
-             ^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1415, in execute
-    return meth(
-           ^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\elements.py", line 523, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1637, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1842, in _execute_context
-    return self._exec_single_context(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1982, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 2351, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1963, in _exec_single_context
-    self.dialect.do_execute(
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py", line 943, in do_execute
-    cursor.execute(statement, parameters)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 153, in execute
-    result = self._query(query)
-             ^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 322, in _query
-    conn.query(q)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 563, in query
-    self._affected_rows = self._read_query_result(unbuffered=unbuffered)
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 825, in _read_query_result
-    result.read()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 1199, in read
-    first_packet = self.connection._read_packet()
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    first_packet = self.connection._read_packet()
-    first_packet = self.connection._read_packet()
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
-    packet.raise_for_error()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\protocol.py", line 219, in raise_for_error
-    first_packet = self.connection._read_packet()
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    first_packet = self.connection._read_packet()
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
-    packet.raise_for_error()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\protocol.py", line 219, in raise_for_error
-    err.raise_mysql_exception(self._data)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\err.py", line 150, in raise_mysql_exception
-    raise errorclass(errno, errval)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
-    packet.raise_for_error()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
-    packet.raise_for_error()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\protocol.py", line 219, in raise_for_error
-    err.raise_mysql_exception(self._data)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\err.py", line 150, in raise_mysql_exception
-    raise errorclass(errno, errval)
-sqlalchemy.exc.IntegrityError: (pymysql.err.IntegrityError) (1452, 'Cannot add or update a child row: a foreign key constraint fails (`pnc_warehouse`.`line_item`, CONSTRAINT `line_item_ibfk_2` FOREIGN KEY (`df_line_item_type_id`) REFERENCES `line_item_type` (`df_line_item_type_id`))')
-[SQL: INSERT INTO line_item (df_line_item_id, df_invoice_id, df_line_item_type_id, source_line_item_id, source_line_item_type, description, amount, df_source_system_id) VALUES (%(df_line_item_id)s, %(df_invoice_id)s, %(df_line_item_type_id)s, %(source_line_item_id)s, line_item.source_line_item_type, %(description)s, %(amount)s, %(df_source_system_id)s)]
-[parameters: {'df_line_item_id': 'ae773f66-3aa0-5efe-8325-3488f92c35ce', 'df_invoice_id': '222ab7b8-5969-5e78-b7c0-7874f508df5e', 'df_line_item_type_id': 'be8c5d0a-6872-5161-b13e-7e180bb833bf', 'source_line_item_id': '461562702-20010525-853259_bp', 'description': 'Base Premium', 'amount': 89.0, 'df_source_system_id': 12}]
-(Background on this error at: https://sqlalche.me/e/20/gkpj)
-(venv) PS C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer>
-
-
-
-
-
-
-
-
-
-
-[DB ERROR] (pymysql.err.IntegrityError) (1452, 'Cannot add or update a child row: a foreign key constraint fails (`pnc_warehouse`.`invoice`, CONSTRAINT `invoice_ibfk_2` FOREIGN KEY (`df_invoice_status_id`) REFERENCES `invoice_status` (`df_invoice_status_id`))')
-[SQL: INSERT INTO invoice (df_invoice_id, source_invoice_id, invoice_number, df_transaction_id, order_date, total_amount_due, due_date, df_invoice_status_id, source_invoice_status, df_source_system_id) VALUES (%(df_invoice_id)s, %(source_invoice_id)s, invoice.invoice_number, invoice.df_transaction_id, invoice.order_date, invoice.total_amount_due, invoice.due_date, invoice.df_invoice_status_id, invoice.source_invoice_status, %(df_source_system_id)s)] 
-[parameters: {'df_invoice_id': 'ef7a060c-f380-51a5-b830-eea2eaba3a2b', 'source_invoice_id': '461574385-20010701-861847', 'df_source_system_id': 12}]
-(Background on this error at: https://sqlalche.me/e/20/gkpj)
-Traceback (most recent call last):
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1963, in _exec_single_context
-    self.dialect.do_execute(
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py", line 943, in do_execute
-    cursor.execute(statement, parameters)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 153, in execute
-    result = self._query(query)
-             ^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 322, in _query
-    conn.query(q)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 563, in query
-    self._affected_rows = self._read_query_result(unbuffered=unbuffered)
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 825, in _read_query_result
-    result.read()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 1199, in read
-    first_packet = self.connection._read_packet()
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
-    packet.raise_for_error()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\protocol.py", line 219, in raise_for_error
-    err.raise_mysql_exception(self._data)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\err.py", line 150, in raise_mysql_exception
-    raise errorclass(errno, errval)
-pymysql.err.IntegrityError: (1452, 'Cannot add or update a child row: a foreign key constraint fails (`pnc_warehouse`.`invoice`, CONSTRAINT `invoice_ibfk_2` FOREIGN KEY (`df_invoice_status_id`) REFERENCES `invoice_status` (`df_invoice_status_id`))')
-
-The above exception was the direct cause of the following exception:
-
-Traceback (most recent call last):
-  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 687, in <module>
-    handle({"Records": [{"body": '{"source_line_item_id":"461568965","source_system":"as400_aff"}'}]}, None)
-  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 682, in handle
-    asyncio.run(consume_lambda(config=payload))
-  File "C:\Program Files\Python312\Lib\asyncio\runners.py", line 194, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "C:\Program Files\Python312\Lib\asyncio\runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Program Files\Python312\Lib\asyncio\base_events.py", line 685, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 674, in consume_lambda
-    raise e
-  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 590, in consume_lambda
-    session.commit()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 2032, in commit
-    trans.commit(_to_root=True)
-  File "<string>", line 2, in commit
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
-    ret_value = fn(self, *arg, **kw)
-                ^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 1313, in commit
-    self._prepare_impl()
-  File "<string>", line 2, in _prepare_impl
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
-    ret_value = fn(self, *arg, **kw)
-                ^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 1288, in _prepare_impl
-    self.session.flush()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 4345, in flush
-    self._flush(objects)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 4480, in _flush
-    with util.safe_reraise():
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\util\langhelpers.py", line 224, in __exit__
-    raise exc_value.with_traceback(exc_tb)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 4441, in _flush
-    flush_context.execute()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\unitofwork.py", line 466, in execute
-    rec.execute(self)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\unitofwork.py", line 642, in execute
-    util.preloaded.orm_persistence.save_obj(
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\persistence.py", line 93, in save_obj
-    _emit_insert_statements(
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\persistence.py", line 1227, in _emit_insert_statements
-    result = connection.execute(
-             ^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1415, in execute
-    return meth(
-           ^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\elements.py", line 523, in _execute_on_connection
-    return connection._execute_clauseelement(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1637, in _execute_clauseelement
-    ret = self._execute_context(
-          ^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1842, in _execute_context
-    return self._exec_single_context(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1982, in _exec_single_context
-    self._handle_dbapi_exception(
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 2351, in _handle_dbapi_exception
-    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1963, in _exec_single_context
-    self.dialect.do_execute(
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py", line 943, in do_execute
-    cursor.execute(statement, parameters)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 153, in execute
-    result = self._query(query)
-             ^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 322, in _query
-    conn.query(q)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 563, in query
-    self._affected_rows = self._read_query_result(unbuffered=unbuffered)
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 825, in _read_query_result
-    result.read()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 1199, in read
-    first_packet = self.connection._read_packet()
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
-    packet.raise_for_error()
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\protocol.py", line 219, in raise_for_error
-    err.raise_mysql_exception(self._data)
-  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\err.py", line 150, in raise_mysql_exception
-    raise errorclass(errno, errval)
-sqlalchemy.exc.IntegrityError: (pymysql.err.IntegrityError) (1452, 'Cannot add or update a child row: a foreign key constraint fails (`pnc_warehouse`.`invoice`, CONSTRAINT `invoice_ibfk_2` FOREIGN KEY (`df_invoice_status_id`) REFERENCES `invoice_status` (`df_invoice_status_id`))')
-[SQL: INSERT INTO invoice (df_invoice_id, source_invoice_id, invoice_number, df_transaction_id, order_date, total_amount_due, due_date, df_invoice_status_id, source_invoice_status, df_source_system_id) VALUES (%(df_invoice_id)s, %(source_invoice_id)s, invoice.invoice_number, invoice.df_transaction_id, invoice.order_date, invoice.total_amount_due, invoice.due_date, invoice.df_invoice_status_id, invoice.source_invoice_status, %(df_source_system_id)s)] 
-
-
-
-
-
-
-
-class Invoice(Base, todictclass):
-    __tablename__ = 'invoice'
-
-    df_invoice_id = Column(CHAR(36), primary_key=True)
-    source_invoice_id = Column(String(64))
-    invoice_number = Column(String(64))
-    df_transaction_id = Column(CHAR(36), ForeignKey('transaction.df_transaction_id'))
-    order_date = Column(DateTime)
-    total_amount_due = Column(DECIMAL(18, 5))
-    due_date = Column(DateTime)
-    df_invoice_status_id = Column(Integer, ForeignKey('invoice_status.df_invoice_status_id'), nullable=False)
-    source_invoice_status = Column(String(64))
-    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
-    created_at = Column(DateTime, server_default=FetchedValue())
-    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
-
-    transaction = relationship('Transaction')
-    invoice_status = relationship('Invoice_Status')
-    source_system = relationship('Source_System')
-
-class Invoice_Status(Base, todictclass):
-    __tablename__ = 'invoice_status'
-
-    df_invoice_status_id = Column(Integer, primary_key=True, autoincrement=True)
-    invoice_status = Column(String(128))
-    created_at = Column(DateTime, server_default=FetchedValue())
-    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
-[parameters: {'df_invoice_id': 'ef7a060c-f380-51a5-b830-eea2eaba3a2b', 'source_invoice_id': '461574385-20010701-861847', 'df_source_system_id': 12}]
-(Background on this error at: https://sqlalche.me/e/20/gkpj)
-(venv) PS C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+if __name__ == "__main__":
+    handle({"Records": [{"body": '{"source_line_item_id":"472191937","source_system":"as400_aff"}'}]}, None)
