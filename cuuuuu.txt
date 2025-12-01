@@ -581,9 +581,44 @@ Traceback (most recent call last):
     raise errorclass(errno, errval)
 sqlalchemy.exc.IntegrityError: (pymysql.err.IntegrityError) (1452, 'Cannot add or update a child row: a foreign key constraint fails (`pnc_warehouse`.`invoice`, CONSTRAINT `invoice_ibfk_2` FOREIGN KEY (`df_invoice_status_id`) REFERENCES `invoice_status` (`df_invoice_status_id`))')
 [SQL: INSERT INTO invoice (df_invoice_id, source_invoice_id, invoice_number, df_transaction_id, order_date, total_amount_due, due_date, df_invoice_status_id, source_invoice_status, df_source_system_id) VALUES (%(df_invoice_id)s, %(source_invoice_id)s, invoice.invoice_number, invoice.df_transaction_id, invoice.order_date, invoice.total_amount_due, invoice.due_date, invoice.df_invoice_status_id, invoice.source_invoice_status, %(df_source_system_id)s)] 
+
+
+
+
+
+
+
+class Invoice(Base, todictclass):
+    __tablename__ = 'invoice'
+
+    df_invoice_id = Column(CHAR(36), primary_key=True)
+    source_invoice_id = Column(String(64))
+    invoice_number = Column(String(64))
+    df_transaction_id = Column(CHAR(36), ForeignKey('transaction.df_transaction_id'))
+    order_date = Column(DateTime)
+    total_amount_due = Column(DECIMAL(18, 5))
+    due_date = Column(DateTime)
+    df_invoice_status_id = Column(Integer, ForeignKey('invoice_status.df_invoice_status_id'), nullable=False)
+    source_invoice_status = Column(String(64))
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    transaction = relationship('Transaction')
+    invoice_status = relationship('Invoice_Status')
+    source_system = relationship('Source_System')
+
+class Invoice_Status(Base, todictclass):
+    __tablename__ = 'invoice_status'
+
+    df_invoice_status_id = Column(Integer, primary_key=True, autoincrement=True)
+    invoice_status = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
 [parameters: {'df_invoice_id': 'ef7a060c-f380-51a5-b830-eea2eaba3a2b', 'source_invoice_id': '461574385-20010701-861847', 'df_source_system_id': 12}]
 (Background on this error at: https://sqlalche.me/e/20/gkpj)
 (venv) PS C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer>
+
 
 
 
