@@ -1,0 +1,687 @@
+import os
+import json
+import time
+import logging
+import pandas as pd
+import asyncio
+from datetime import datetime
+from sqlalchemy.exc import SQLAlchemyError
+
+from df_database_models.db_conn import get_rds_db_session, get_as400_db_session
+from df_database_models.models import Line_Item, Line_Item_Type, Invoice, Source_System, Invoice_Status
+from df_database_models.db_utils import (
+    generate_uuid, convert_timestamps, query_update_dict, get_record, multi_filter_get_record
+)
+from secrets_manager import get_secret
+from adf_pyutils.clm_wrapper import common_logger
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+
+
+os.environ["AWS_REGION"] = "us-east-1"
+
+os.environ['RDS_DB_NAME'] = "pnc_warehouse"
+os.environ['RDS_REF_DB_NAME'] = "ref_data"
+os.environ['RDS_RAW_DB_NAME'] = "mdm_raw"
+os.environ['RDS_REFINED_DB_NAME'] = "mdm_refined"
+
+os.environ['AS400_AFF_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-azsql-affpmsqc-credentials-secret-XJspXZ"
+os.environ['AS400_KKINS_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-azsql-kkinsqc-credentials-secret-KThAVI"
+os.environ['AUMINE_AFF_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-audbm-affods-credentials-secret-vclZk7"
+os.environ['AUMINE_AUM_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-audbm-aumods-credentials-secret-tOkXG3"
+
+os.environ['RDS_HOST'] = "affinity-ods2-develop.cluster-cj3qp6qspcpk.us-east-1.rds.amazonaws.com"
+os.environ['RDS_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-ods2-ar4262-dv001-rds-master-credentials-169S6S"
+os.environ['SQS_POLICY_UPDATE_URL'] = "https://6ekyb6mh5sxa3wpf3waq7ckvy40gckvy.lambda-url.us-east-1.on.aws/policy-update"
+os.environ['SQS_PRODUCER_SECRET_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-tds-sqs-producer-v2-credentials-Cna5zK"
+
+pnc_db = os.environ['RDS_DB_NAME']
+ref_db = os.environ['RDS_REF_DB_NAME']
+mdm_raw_db = os.environ['RDS_RAW_DB_NAME']
+mdm_refined_db = os.environ['RDS_REFINED_DB_NAME']
+
+# --- Env DB Configs ---
+os.environ["AWS_REGION"] = "us-east-1"
+os.environ['RDS_DB_NAME'] = "pnc_warehouse"
+os.environ['RDS_REF_DB_NAME'] = "ref_data"
+os.environ['RDS_RAW_DB_NAME'] = "mdm_raw"
+os.environ['RDS_REFINED_DB_NAME'] = "mdm_refined"
+
+# --- Env DB Configs ---
+pnc_db = os.environ['RDS_DB_NAME']
+ref_db = os.environ['RDS_REF_DB_NAME']
+mdm_raw_db = os.environ['RDS_RAW_DB_NAME']
+mdm_refined_db = os.environ['RDS_REFINED_DB_NAME']
+
+
+# --- Async Logger Wrapper ---
+async def log_msg(func, **kwargs):
+    await asyncio.to_thread(func, **kwargs)
+
+
+# --- Session/Engine Initializer ---
+def call_session_engine(source_system=None, database_name=None):
+
+    rds_secret_name = os.environ["RDS_SECRETS_MANAGER_ID"]
+    region_name = os.environ["AWS_REGION"]
+    rds_host_nm = os.environ['RDS_HOST']
+
+    if database_name == 'ref_data':
+        rds_db_nm = os.environ['RDS_REF_DB_NAME']
+    elif database_name == 'mdm_raw':
+        rds_db_nm = os.environ['RDS_RAW_DB_NAME']
+    elif database_name == 'mdm_refined':
+        rds_db_nm = os.environ['RDS_REFINED_DB_NAME']
+    else:
+        rds_db_nm = os.environ['RDS_DB_NAME']
+
+    if source_system and source_system.lower() == 'as400_aff':
+        as400_secret_name = os.environ["AS400_AFF_SECRETS_MANAGER_ID"]
+        as400_engine = get_as400_db_session(as400_secret_name, region_name)
+        return as400_engine
+
+    elif source_system and source_system.lower() == 'as400_kkins':
+        as400_secret_name = os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+        as400_engine = get_as400_db_session(as400_secret_name, region_name)
+        return as400_engine
+
+    elif source_system and source_system.lower() == 'as400_attorney':
+        as400_secret_name = os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+        as400_engine = get_as400_db_session(as400_secret_name, region_name)
+        return as400_engine
+
+    if database_name:
+        session = get_rds_db_session(rds_secret_name, region_name, rds_host_nm, rds_db_nm)
+        return session
+
+
+# --- Global Sessions ---
+session = call_session_engine(database_name=pnc_db)
+as400_engine_aff = call_session_engine(source_system='as400_aff')
+as400_engine_kkins = call_session_engine(source_system='as400_kkins')
+as400_engine_attorney = call_session_engine(source_system='as400_attorney')
+
+
+# --- Lookup LineItem from AS400 ---
+def lookup_as400_lineitem(config=None, id=None):
+    source_system = config.get("source_system")
+    df = None
+
+    if source_system and source_system.lower() == "as400_aff":
+        df = pd.read_sql(f"""
+                SELECT 
+                main.source_invoice_id,
+                main.source_invoice_id + '_bp' AS source_line_item_id,
+                'base_premium' AS source_line_item_type,
+                'Base Premium' AS description,
+                main.BASE_PREMIUM AS amount
+            FROM (
+                SELECT DISTINCT 
+                    da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
+                    cov.BASE_PREMIUM,
+                    cov.TAX,
+                    da.commission_amount,
+                    CASE 
+                        WHEN ds.total_discount != 0 THEN ds.total_discount
+                        WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
+                        ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
+                    END AS Discount
+                FROM 
+                    (
+                        SELECT DISTINCT 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                            INVOICE_NO,
+                            SUM(PREMIUM) AS premium,
+                            SUM(commission_amount) AS commission_amount,
+                            CASE	
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
+                                    THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                            END AS effective_date 
+                        FROM 
+                            ADGDTADV.U__ARFILE
+                        GROUP BY 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                            INVOICE_NO,
+                            EFFECTIVE_DATE_6
+                    ) AS da
+                INNER JOIN 
+                    (
+                        SELECT 
+                            CUSTOMER_NO,
+                            EFFECTIVE_DATE,
+                            ACCOUNT_NO,
+                            BASE_PREMIUM,
+                            TOTAL_PREMIUM,
+                            POLICY_EFF_DATE,
+                            INVOICE_NO,
+                            (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
+                            LAST_PAYMENT_DATE
+                        FROM ADGDTADV.NSOCVGP
+                    ) AS cov 
+                    ON cov.CUSTOMER_NO = da.customer_number 
+                    AND cov.EFFECTIVE_DATE = da.effective_date
+                    AND cov.INVOICE_NO = da.invoice_no
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            GRCUST AS customer_no,
+                            GRDISP AS discount_percentage,
+                            GRPEFF AS effective_date,
+                            GRSEQN AS seq_no
+                        FROM ADGDTADV.HCPGRDCP
+                    ) AS dis
+                    ON dis.customer_no = da.customer_number 
+                    AND dis.effective_date = da.effective_date
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            customer_number,
+                            cvg_effective_date AS effective_date,
+                            total_discount
+                        FROM ADGDTADV.ADGDSRP
+                    ) AS ds
+                    ON ds.customer_number = da.customer_number 
+                    AND ds.effective_date = da.effective_date
+            ) AS main
+            UNION ALL
+            SELECT 
+                main.source_invoice_id,
+                main.source_invoice_id + '_tax' AS source_line_item_id,
+                'tax' AS source_line_item_type,
+                'Tax' AS description,
+                main.TAX AS amount
+            FROM (
+                -- Repeat the same subquery as above for each UNION ALL
+                SELECT DISTINCT 
+                    da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
+                    cov.BASE_PREMIUM,
+                    cov.TAX,
+                    da.commission_amount,
+                    CASE 
+                        WHEN ds.total_discount != 0 THEN ds.total_discount
+                        WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
+                        ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
+                    END AS Discount
+                FROM 
+                    (
+                        SELECT DISTINCT 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                            INVOICE_NO,
+                            SUM(PREMIUM) AS premium,
+                            SUM(commission_amount) AS commission_amount,
+                            CASE	
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
+                                    THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                            END AS effective_date 
+                        FROM 
+                            ADGDTADV.U__ARFILE
+                        GROUP BY 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                            INVOICE_NO,
+                            EFFECTIVE_DATE_6
+                    ) AS da
+                INNER JOIN 
+                    (
+                        SELECT 
+                            CUSTOMER_NO,
+                            EFFECTIVE_DATE,
+                            ACCOUNT_NO,
+                            BASE_PREMIUM,
+                            TOTAL_PREMIUM,
+                            POLICY_EFF_DATE,
+                            INVOICE_NO,
+                            (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
+                            LAST_PAYMENT_DATE
+                        FROM ADGDTADV.NSOCVGP
+                    ) AS cov 
+                    ON cov.CUSTOMER_NO = da.customer_number 
+                    AND cov.EFFECTIVE_DATE = da.effective_date
+                    AND cov.INVOICE_NO = da.invoice_no
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            GRCUST AS customer_no,
+                            GRDISP AS discount_percentage,
+                            GRPEFF AS effective_date,
+                            GRSEQN AS seq_no
+                        FROM ADGDTADV.HCPGRDCP
+                    ) AS dis
+                    ON dis.customer_no = da.customer_number 
+                    AND dis.effective_date = da.effective_date
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            customer_number,
+                            cvg_effective_date AS effective_date,
+                            total_discount
+                        FROM ADGDTADV.ADGDSRP
+                    ) AS ds
+                    ON ds.customer_number = da.customer_number 
+                    AND ds.effective_date = da.effective_date
+            ) AS main
+            UNION ALL
+            SELECT 
+                main.source_invoice_id,
+                main.source_invoice_id + '_ca' AS source_line_item_id,
+                'commission_amount' AS source_line_item_type,
+                'Commission Amount' AS description,
+                main.commission_amount AS amount
+            FROM (
+                -- Repeat the same subquery as above for each UNION ALL
+                SELECT DISTINCT 
+            da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
+                    cov.BASE_PREMIUM,
+                    cov.TAX,
+                    da.commission_amount,
+                    CASE 
+                        WHEN ds.total_discount != 0 THEN ds.total_discount
+                        WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
+                        ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
+                    END AS Discount
+                FROM 
+                    (
+                        SELECT DISTINCT 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                            INVOICE_NO,
+                            SUM(PREMIUM) AS premium,
+                            SUM(commission_amount) AS commission_amount,
+                            CASE	
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
+                                    THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                            END AS effective_date 
+                        FROM 
+                            ADGDTADV.U__ARFILE
+                        GROUP BY 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                            INVOICE_NO,
+                            EFFECTIVE_DATE_6
+                    ) AS da
+                INNER JOIN 
+                    (
+                        SELECT 
+                            CUSTOMER_NO,
+                            EFFECTIVE_DATE,
+                            ACCOUNT_NO,
+                            BASE_PREMIUM,
+                            TOTAL_PREMIUM,
+                            POLICY_EFF_DATE,
+                            INVOICE_NO,
+                            (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
+                            LAST_PAYMENT_DATE
+                        FROM ADGDTADV.NSOCVGP
+                    ) AS cov 
+                    ON cov.CUSTOMER_NO = da.customer_number 
+                    AND cov.EFFECTIVE_DATE = da.effective_date
+                    AND cov.INVOICE_NO = da.invoice_no
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            GRCUST AS customer_no,
+                            GRDISP AS discount_percentage,
+                            GRPEFF AS effective_date,
+                            GRSEQN AS seq_no
+                        FROM ADGDTADV.HCPGRDCP
+                    ) AS dis
+                    ON dis.customer_no = da.customer_number 
+                    AND dis.effective_date = da.effective_date
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            customer_number,
+                            cvg_effective_date AS effective_date,
+                            total_discount
+                        FROM ADGDTADV.ADGDSRP
+                    ) AS ds
+                    ON ds.customer_number = da.customer_number 
+                    AND ds.effective_date = da.effective_date
+            ) AS main
+            UNION ALL
+            SELECT 
+                main.source_invoice_id,
+                main.source_invoice_id + '_dis' AS source_line_item_id,
+                'discount' AS source_line_item_type,
+                'Discount' AS description,
+                main.Discount AS amount
+            FROM (
+                -- Repeat the same subquery as above for each UNION ALL
+                SELECT DISTINCT 
+                    da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
+                    cov.BASE_PREMIUM,
+            cov.TAX,
+                    da.commission_amount,
+                    CASE 
+                        WHEN ds.total_discount != 0 THEN ds.total_discount
+                        WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
+                        ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
+                    END AS Discount
+                FROM 
+                    (
+                        SELECT DISTINCT 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                            INVOICE_NO,
+                            SUM(PREMIUM) AS premium,
+                            SUM(commission_amount) AS commission_amount,
+                            CASE	
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
+                                    THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
+                                    THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                                ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                            END AS effective_date 
+                        FROM 
+                            ADGDTADV.U__ARFILE
+                        GROUP BY 
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                            INVOICE_NO,
+                            EFFECTIVE_DATE_6
+                    ) AS da
+                INNER JOIN 
+                    (
+                        SELECT 
+                            CUSTOMER_NO,
+                            EFFECTIVE_DATE,
+                            ACCOUNT_NO,
+                            BASE_PREMIUM,
+                            TOTAL_PREMIUM,
+                            POLICY_EFF_DATE,
+                            INVOICE_NO,
+                            (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
+                            LAST_PAYMENT_DATE
+                        FROM ADGDTADV.NSOCVGP
+                    ) AS cov 
+                    ON cov.CUSTOMER_NO = da.customer_number 
+                    AND cov.EFFECTIVE_DATE = da.effective_date
+                    AND cov.INVOICE_NO = da.invoice_no
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            GRCUST AS customer_no,
+                            GRDISP AS discount_percentage,
+                            GRPEFF AS effective_date,
+                            GRSEQN AS seq_no
+                        FROM ADGDTADV.HCPGRDCP
+                    ) AS dis
+                    ON dis.customer_no = da.customer_number 
+                    AND dis.effective_date = da.effective_date
+                LEFT JOIN 
+                    (
+                        SELECT 
+                            customer_number,
+                            cvg_effective_date AS effective_date,
+                            total_discount
+                        FROM ADGDTADV.ADGDSRP
+                    ) AS ds
+                    ON ds.customer_number = da.customer_number 
+                    AND ds.effective_date = da.effective_date
+            ) AS main
+            Where  main.source_invoice_id LIKE '{id}%';
+        """, con=as400_engine_aff)
+
+    elif source_system and source_system.lower() == "as400_kkins":
+        # Example query for kkins, adjust as per schema
+        df = pd.read_sql(f"""
+                SELECT DISTINCT 
+                f0.QBDOC AS source_invoice_id,
+                f0.QBDOC AS invoice_number,
+                (f0.QB$CMP||f0.QB$PFX||f0.QB$NBR||f0.QB$SFX) AS transaction_id,
+                f11.RPRMK AS description,
+                f11.RPAG AS amount,
+                f11.RPRP1 AS source_line_item_type,
+                CASE WHEN f11.RPRP1 = 'P' THEN 'Base Premium'
+                    WHEN f11.RPRP1 = 'S' THEN 'Commission'
+                    WHEN f11.RPRP1 = 'N' AND lower(f11.RPRMK) LIKE '%tax%' THEN 'Tax'
+                    WHEN f11.RPRP1 = 'N' AND lower(f11.RPRMK) LIKE '%disc%' THEN 'Discount'
+                    WHEN f11.RPRP1 = 'N' AND (lower(f11.RPRMK) LIKE '%fee%' OR lower(f11.RPRMK) LIKE '%surplus%') THEN 'Fee'
+                    WHEN f11.RPRP1 = 'N' AND (lower(f11.RPRMK) LIKE '%surc%' OR lower(f11.RPRMK) LIKE '%assess%' ) THEN 'surcharge'
+                    ELSE NULL END AS line_item_type
+                FROM SLEDTA.F55300 AS f0
+                JOIN SLEDTA.F0311 AS f11 ON f11.RPDOC = f0.QBDOC
+                WHERE  TRIM(RPDCTM) = '' AND RPDMTJ = 0 
+
+
+                ---------------------------------
+
+
+
+
+                SELECT DISTINCT 
+                    f0.QBDOC AS source_invoice_id,
+                    f0.QBDOC AS invoice_number,
+                    (f0.QB$PCD||'-'||f0.QB$CMP||'-'||f0.QB$PFX||'-'||f0.QB$NBR||'-'||f0.QB$SFX||'-'||f0.QB$END) AS transaction_id,
+                    f11.RPRMK AS description,
+                    f11.RPAG AS amount,
+                    f11.RPRP1 AS source_line_item_type,
+                    CASE 
+                        WHEN f11.RPRP1 = 'P' THEN 'Base Premium'
+                        WHEN f11.RPRP1 = 'S' THEN 'Commission'
+                        WHEN f11.RPRP1 = 'N' AND lower(f11.RPRMK) LIKE '%tax%' THEN 'Tax'
+                        WHEN f11.RPRP1 = 'N' AND lower(f11.RPRMK) LIKE '%disc%' THEN 'Discount'
+                        WHEN f11.RPRP1 = 'N' AND (lower(f11.RPRMK) LIKE '%fee%' OR lower(f11.RPRMK) LIKE '%surplus%') THEN 'Fee'
+                        WHEN f11.RPRP1 = 'N' AND (lower(f11.RPRMK) LIKE '%surc%' OR lower(f11.RPRMK) LIKE '%assess%' ) THEN 'Surcharge'
+                        ELSE NULL 
+                    END AS line_item_type
+                FROM SLEDTA.F55300 AS f0
+                JOIN SLEDTA.F0311 AS f11 ON f11.RPDOC = f0.QBDOC
+                WHERE TRIM(RPDCTM) = '' 
+                AND RPDMTJ = 0
+                AND f0.QBDOC = '{id}'
+                AND (
+                        (f11.RPRP1 = 'P')
+                        OR (f11.RPRP1 = 'S')
+                        OR (f11.RPRP1 = 'N' AND (
+                            lower(f11.RPRMK) LIKE '%tax%' 
+                            OR lower(f11.RPRMK) LIKE '%disc%'
+                            OR lower(f11.RPRMK) LIKE '%fee%' 
+                            OR lower(f11.RPRMK) LIKE '%surplus%'
+                            OR lower(f11.RPRMK) LIKE '%surc%' 
+                            OR lower(f11.RPRMK) LIKE '%assess%'
+                        ))
+                    )
+        """, con=as400_engine_kkins)
+
+    if df is not None and len(df) > 0:
+        return df.to_dict("records")[0]
+    return None
+
+# --------------------------------------------------------------------
+# Core Consumer for Line Item
+# --------------------------------------------------------------------
+# Core Line Item Consumer (async)
+async def consume_lambda(config=None):
+    print("STEP 1: consume_lambda_line_item started")
+    start_timestamp = datetime.timestamp(datetime.now())
+
+    try:
+        # normalize config(s) into list
+        if isinstance(config, dict):
+            config_list = [config]
+        elif isinstance(config, list):
+            config_list = config
+        else:
+            config_list = json.loads(str(config))
+            if not isinstance(config_list, list):
+                config_list = [config_list]
+
+        print("STEP 2: Processing configs...")
+
+        for config_dict in config_list:
+            source_line_item_id = config_dict.get("source_line_item_id")
+            source_system = config_dict.get("source_system", "").lower()
+
+            print(f"STEP 2.1: Processing line_item={source_line_item_id}, source_system={source_system}")
+
+            # select appropriate as400 engine & do lookup
+            # as400_engine = as400_engine_aff if source_system == "as400_aff" else as400_engine_kkins
+            # as400_line_item = {'source_invoice_id': '461562702-20010525-853259', 'source_line_item_id': '461562702-20010525-853259_bp', 'source_line_item_type': 'base_premium', 'description': 'Base Premium', 'amount': 89.0}
+            as400_line_item = lookup_as400_lineitem(config_dict, source_line_item_id)
+            print("AS400 Line Item:", as400_line_item)
+            if not as400_line_item:
+                print(f"[ERROR] No AS400 line item found for id={source_line_item_id}")
+                continue
+
+            # --- Source_System Upsert ---
+            ss_query = multi_filter_get_record(session, model=Source_System, source_system=source_system)
+            ss_record = ss_query.first() if ss_query else None
+            if not ss_record:
+                df_source_system_id = generate_uuid(str(source_system), "SourceSystem")
+                source_system_dict = {
+                    "source_system": source_system,
+                    "df_source_system_id": df_source_system_id
+                }
+                session.add(Source_System.from_dict(cls=Source_System, d=source_system_dict))
+                session.commit()
+                print(f"Inserted new Source_System: {source_system}")
+                as400_line_item["df_source_system_id"] = df_source_system_id
+            else:
+                as400_line_item["df_source_system_id"] = ss_record.df_source_system_id
+
+            df_source_system_id = as400_line_item["df_source_system_id"]
+
+            # --- Invoice Upsert ---
+            src_invoice_id = as400_line_item.get("source_invoice_id")
+            invoice_record = session.query(Invoice).filter(
+                Invoice.source_invoice_id == src_invoice_id,
+                Invoice.df_source_system_id == df_source_system_id
+            ).first()
+
+            if invoice_record:
+                as400_line_item["df_invoice_id"] = invoice_record.df_invoice_id
+                print(f"Invoice already exists with df_invoice_id {invoice_record.df_invoice_id}")
+            else:
+                df_invoice_id = generate_uuid(str(src_invoice_id or ''), str(df_source_system_id))
+                as400_line_item["df_invoice_id"] = df_invoice_id
+
+                # Paranoia check by PK
+                existing_invoice = session.query(Invoice).filter(
+                    Invoice.df_invoice_id == df_invoice_id
+                ).first()
+                if not existing_invoice:
+                    # Construct invoice dict minimal required fields — expand if more are available
+                    invoice_dict = {
+                        "source_invoice_id": src_invoice_id,
+                        "df_invoice_id": df_invoice_id,
+                        "df_source_system_id": df_source_system_id,
+                        "created_date": datetime.now()
+                    }
+                    session.add(Invoice.from_dict(cls=Invoice, d=invoice_dict))
+                    session.commit()
+                    print(f"Inserted new Invoice {src_invoice_id} with df_invoice_id {df_invoice_id}")
+                else:
+                    print(f"Invoice already exists by PK with df_invoice_id {existing_invoice.df_invoice_id}")
+                    as400_line_item["df_invoice_id"] = existing_invoice.df_invoice_id
+
+            # --- Line_Item_Type Upsert ---
+            src_line_item_type = as400_line_item.get("source_line_item_type")
+            lit_record = session.query(Line_Item_Type).filter(
+                Line_Item_Type.line_item_type == src_line_item_type
+                # Line_Item_Type.df_source_system_id == df_source_system_id
+            ).first()
+
+            if lit_record:
+                as400_line_item["df_line_item_type_id"] = lit_record.df_line_item_type_id
+            else:
+                lit_obj = Line_Item_Type(
+                    source_line_item_type=src_line_item_type,
+                    line_item_type=src_line_item_type,
+                    df_source_system_id=df_source_system_id
+                )
+                session.add(lit_obj)
+                as400_line_item["df_line_item_type_id"] = lit_obj.df_line_item_type_id
+                session.commit()
+
+
+            # --- Line_Item Upsert ---
+            contact_record = session.query(Line_Item).filter(
+                Line_Item.source_line_item_id == as400_line_item.get("source_line_item_id"),
+                Line_Item.df_invoice_id == as400_line_item.get("df_invoice_id"),
+                Line_Item.df_source_system_id == as400_line_item.get("df_source_system_id")
+            ).first()
+
+            if contact_record:
+                print(f"Line_Item already exists with df_line_item_id {contact_record.df_line_item_id}")
+                # If you want to update existing fields, use query_update_dict or manual assignment + commit
+                # contact_record.update(query_update_dict(obj=Line_Item, dict=as400_line_item))
+                # session.commit()
+                print(f"Updated existing Line_Item {contact_record.df_line_item_id}")
+            else:
+                # create composite UUID key similar to your contact code
+                uuid_key = (
+                    str(as400_line_item.get("source_line_item_id") or '') +
+                    str(as400_line_item.get("df_invoice_id") or '') +
+                    str(as400_line_item.get("df_source_system_id") or '')
+                )
+                df_line_item_id = generate_uuid(uuid_key, str(df_source_system_id))
+                as400_line_item["df_line_item_id"] = df_line_item_id
+
+                # Paranoia check by PK
+                existing_line_uuid = session.query(Line_Item).filter(
+                    Line_Item.df_line_item_id == df_line_item_id
+                ).first()
+                if not existing_line_uuid:
+                    # Map fields that the Line_Item model expects. Add/adjust fields as per your model definition.
+                    print('IUnside if &&&&&&&&&&&&&&&&&&&&********************************************')
+                    print(as400_line_item)
+                    print('IUnside if &&&&&&&&&&&&&&&&&&&&********************************************')
+                    print(df_line_item_id)
+                    print('IUnside if &&&&&&&&&&&&&&&&&&&&********************************************')
+                    line_item_dict = {
+                        "df_line_item_id": df_line_item_id,
+                        "source_line_item_id": as400_line_item.get("source_line_item_id"),
+                        "df_invoice_id": as400_line_item.get("df_invoice_id"),
+                        "df_line_item_type_id": as400_line_item.get("df_line_item_type_id"),
+                        "df_source_system_id": as400_line_item.get("df_source_system_id"),
+                        "description": as400_line_item.get("description"),
+                        "amount": as400_line_item.get("amount"),
+                        "created_date": datetime.now()
+                    }
+                    session.add(Line_Item.from_dict(cls=Line_Item, d=line_item_dict))
+                    session.commit()
+                    print(f"Inserted new Line_Item {source_line_item_id} with df_line_item_id {df_line_item_id}")
+                else:
+                    print(f"Line_Item already exists by PK with df_line_item_id {existing_line_uuid.df_line_item_id}")
+                    as400_line_item["df_line_item_id"] = existing_line_uuid.df_line_item_id
+
+        end_timestamp = datetime.timestamp(datetime.now())
+        print(f"STEP 9: Finished line item ingestion. Total time: {end_timestamp - start_timestamp}s")
+        return {'execution_time_sec': end_timestamp - start_timestamp}
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        print("[DB ERROR]", str(e))
+        raise e
+
+# --- Lambda Handler ---
+def handle(event, context):
+    start_time = time.time()
+    print("Handle function is called")
+    for record in event['Records']:
+        payload = record["body"]
+        asyncio.run(consume_lambda(config=payload))
+    return {"execution_time_sec": time.time() - start_time}
+
+
+if __name__ == "__main__":
+    handle({"Records": [{"body": '{"source_line_item_id":"461568965","source_system":"as400_aff"}'}]}, None)
