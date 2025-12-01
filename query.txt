@@ -1,0 +1,326 @@
+SELECT 
+    main.source_invoice_id,
+    main.source_invoice_id + '_bp' AS source_line_item_id,
+    'base_premium' AS source_line_item_type,
+    'Base Premium' AS description,
+    main.BASE_PREMIUM AS amount
+FROM (
+    SELECT DISTINCT 
+        da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
+        cov.BASE_PREMIUM,
+        cov.TAX,
+        da.commission_amount,
+        CASE 
+            WHEN ds.total_discount != 0 THEN ds.total_discount
+            WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
+            ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
+        END AS Discount
+    FROM 
+        (
+            SELECT DISTINCT 
+                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                INVOICE_NO,
+                SUM(PREMIUM) AS premium,
+                SUM(commission_amount) AS commission_amount,
+                CASE	
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
+                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
+                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
+                        THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                    ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                END AS effective_date 
+            FROM 
+                ADGDTADV.U__ARFILE
+            GROUP BY 
+                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                INVOICE_NO,
+                EFFECTIVE_DATE_6
+        ) AS da
+    INNER JOIN 
+        (
+            SELECT 
+                CUSTOMER_NO,
+                EFFECTIVE_DATE,
+                ACCOUNT_NO,
+                BASE_PREMIUM,
+                TOTAL_PREMIUM,
+                POLICY_EFF_DATE,
+                INVOICE_NO,
+                (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
+                LAST_PAYMENT_DATE
+            FROM ADGDTADV.NSOCVGP
+        ) AS cov 
+        ON cov.CUSTOMER_NO = da.customer_number 
+        AND cov.EFFECTIVE_DATE = da.effective_date
+        AND cov.INVOICE_NO = da.invoice_no
+    LEFT JOIN 
+        (
+            SELECT 
+                GRCUST AS customer_no,
+                GRDISP AS discount_percentage,
+                GRPEFF AS effective_date,
+                GRSEQN AS seq_no
+            FROM ADGDTADV.HCPGRDCP
+        ) AS dis
+        ON dis.customer_no = da.customer_number 
+        AND dis.effective_date = da.effective_date
+    LEFT JOIN 
+        (
+            SELECT 
+                customer_number,
+                cvg_effective_date AS effective_date,
+                total_discount
+            FROM ADGDTADV.ADGDSRP
+        ) AS ds
+        ON ds.customer_number = da.customer_number 
+        AND ds.effective_date = da.effective_date
+) AS main
+UNION ALL
+SELECT 
+    main.source_invoice_id,
+    main.source_invoice_id + '_tax' AS source_line_item_id,
+    'tax' AS source_line_item_type,
+    'Tax' AS description,
+    main.TAX AS amount
+FROM (
+    -- Repeat the same subquery as above for each UNION ALL
+    SELECT DISTINCT 
+        da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
+        cov.BASE_PREMIUM,
+        cov.TAX,
+        da.commission_amount,
+        CASE 
+            WHEN ds.total_discount != 0 THEN ds.total_discount
+            WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
+            ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
+        END AS Discount
+    FROM 
+        (
+            SELECT DISTINCT 
+                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                INVOICE_NO,
+                SUM(PREMIUM) AS premium,
+                SUM(commission_amount) AS commission_amount,
+                CASE	
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
+                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
+                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
+                        THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                    ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                END AS effective_date 
+            FROM 
+                ADGDTADV.U__ARFILE
+            GROUP BY 
+                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                INVOICE_NO,
+                EFFECTIVE_DATE_6
+        ) AS da
+    INNER JOIN 
+        (
+            SELECT 
+                CUSTOMER_NO,
+                EFFECTIVE_DATE,
+                ACCOUNT_NO,
+                BASE_PREMIUM,
+                TOTAL_PREMIUM,
+                POLICY_EFF_DATE,
+                INVOICE_NO,
+                (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
+                LAST_PAYMENT_DATE
+            FROM ADGDTADV.NSOCVGP
+        ) AS cov 
+        ON cov.CUSTOMER_NO = da.customer_number 
+        AND cov.EFFECTIVE_DATE = da.effective_date
+        AND cov.INVOICE_NO = da.invoice_no
+    LEFT JOIN 
+        (
+            SELECT 
+                GRCUST AS customer_no,
+                GRDISP AS discount_percentage,
+                GRPEFF AS effective_date,
+                GRSEQN AS seq_no
+            FROM ADGDTADV.HCPGRDCP
+        ) AS dis
+        ON dis.customer_no = da.customer_number 
+        AND dis.effective_date = da.effective_date
+    LEFT JOIN 
+        (
+            SELECT 
+                customer_number,
+                cvg_effective_date AS effective_date,
+                total_discount
+            FROM ADGDTADV.ADGDSRP
+        ) AS ds
+        ON ds.customer_number = da.customer_number 
+        AND ds.effective_date = da.effective_date
+) AS main
+UNION ALL
+SELECT 
+    main.source_invoice_id,
+    main.source_invoice_id + '_ca' AS source_line_item_id,
+    'commission_amount' AS source_line_item_type,
+    'Commission Amount' AS description,
+    main.commission_amount AS amount
+FROM (
+    -- Repeat the same subquery as above for each UNION ALL
+    SELECT DISTINCT 
+da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
+        cov.BASE_PREMIUM,
+        cov.TAX,
+        da.commission_amount,
+        CASE 
+            WHEN ds.total_discount != 0 THEN ds.total_discount
+            WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
+            ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
+        END AS Discount
+    FROM 
+        (
+            SELECT DISTINCT 
+                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                INVOICE_NO,
+                SUM(PREMIUM) AS premium,
+                SUM(commission_amount) AS commission_amount,
+                CASE	
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
+                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
+                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
+                        THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                    ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                END AS effective_date 
+            FROM 
+                ADGDTADV.U__ARFILE
+            GROUP BY 
+                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                INVOICE_NO,
+                EFFECTIVE_DATE_6
+        ) AS da
+    INNER JOIN 
+        (
+            SELECT 
+                CUSTOMER_NO,
+                EFFECTIVE_DATE,
+                ACCOUNT_NO,
+                BASE_PREMIUM,
+                TOTAL_PREMIUM,
+                POLICY_EFF_DATE,
+                INVOICE_NO,
+                (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
+                LAST_PAYMENT_DATE
+            FROM ADGDTADV.NSOCVGP
+        ) AS cov 
+        ON cov.CUSTOMER_NO = da.customer_number 
+        AND cov.EFFECTIVE_DATE = da.effective_date
+        AND cov.INVOICE_NO = da.invoice_no
+    LEFT JOIN 
+        (
+            SELECT 
+                GRCUST AS customer_no,
+                GRDISP AS discount_percentage,
+                GRPEFF AS effective_date,
+                GRSEQN AS seq_no
+            FROM ADGDTADV.HCPGRDCP
+        ) AS dis
+        ON dis.customer_no = da.customer_number 
+        AND dis.effective_date = da.effective_date
+    LEFT JOIN 
+        (
+            SELECT 
+                customer_number,
+                cvg_effective_date AS effective_date,
+                total_discount
+            FROM ADGDTADV.ADGDSRP
+        ) AS ds
+        ON ds.customer_number = da.customer_number 
+        AND ds.effective_date = da.effective_date
+) AS main
+UNION ALL
+SELECT 
+    main.source_invoice_id,
+    main.source_invoice_id + '_dis' AS source_line_item_id,
+    'discount' AS source_line_item_type,
+    'Discount' AS description,
+    main.Discount AS amount
+FROM (
+    -- Repeat the same subquery as above for each UNION ALL
+    SELECT DISTINCT 
+        da.customer_number + '-' + da.effective_date + '-' + CAST(da.invoice_no AS VARCHAR(10)) AS source_invoice_id,
+        cov.BASE_PREMIUM,
+   cov.TAX,
+        da.commission_amount,
+        CASE 
+            WHEN ds.total_discount != 0 THEN ds.total_discount
+            WHEN dis.discount_percentage != 0 THEN (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100 
+            ELSE COALESCE(ds.total_discount, (cov.TOTAL_PREMIUM / dis.discount_percentage) * 100) 
+        END AS Discount
+    FROM 
+        (
+            SELECT DISTINCT 
+                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                INVOICE_NO,
+                SUM(PREMIUM) AS premium,
+                SUM(commission_amount) AS commission_amount,
+                CASE	
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75' 
+                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2) >= '75'
+                        THEN '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                    WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 
+                        THEN '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)   
+                    ELSE '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2) 
+                END AS effective_date 
+            FROM 
+                ADGDTADV.U__ARFILE
+            GROUP BY 
+                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                INVOICE_NO,
+                EFFECTIVE_DATE_6
+        ) AS da
+    INNER JOIN 
+        (
+            SELECT 
+                CUSTOMER_NO,
+                EFFECTIVE_DATE,
+                ACCOUNT_NO,
+                BASE_PREMIUM,
+                TOTAL_PREMIUM,
+                POLICY_EFF_DATE,
+                INVOICE_NO,
+                (STATE_TAX + TOWN_TAX + COUNTY_TAX) AS TAX,
+                LAST_PAYMENT_DATE
+            FROM ADGDTADV.NSOCVGP
+        ) AS cov 
+        ON cov.CUSTOMER_NO = da.customer_number 
+        AND cov.EFFECTIVE_DATE = da.effective_date
+        AND cov.INVOICE_NO = da.invoice_no
+    LEFT JOIN 
+        (
+            SELECT 
+                GRCUST AS customer_no,
+                GRDISP AS discount_percentage,
+                GRPEFF AS effective_date,
+                GRSEQN AS seq_no
+            FROM ADGDTADV.HCPGRDCP
+        ) AS dis
+        ON dis.customer_no = da.customer_number 
+        AND dis.effective_date = da.effective_date
+    LEFT JOIN 
+        (
+            SELECT 
+                customer_number,
+                cvg_effective_date AS effective_date,
+                total_discount
+            FROM ADGDTADV.ADGDSRP
+        ) AS ds
+        ON ds.customer_number = da.customer_number 
+        AND ds.effective_date = da.effective_date
+) AS main
