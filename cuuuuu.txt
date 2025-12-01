@@ -305,11 +305,6 @@ if contact_record:
 
 
 
-IUnside if &&&&&&&&&&&&&&&&&&&&********************************************
-{'source_invoice_id': '461562702-20010525-853259', 'source_line_item_id': '461562702-20010525-853259_bp', 'source_line_item_type': 'base_premium', 'description': 'Base Premium', 'amount': 89.0, 'df_source_system_id': 12, 'df_invoice_id': '222ab7b8-5969-5e78-b7c0-7874f508df5e', 'df_line_item_type_id': 'be8c5d0a-6872-5161-b13e-7e180bb833bf', 'df_line_item_id': 'ae773f66-3aa0-5efe-8325-3488f92c35ce'}
-IUnside if &&&&&&&&&&&&&&&&&&&&********************************************
-ae773f66-3aa0-5efe-8325-3488f92c35ce
-IUnside if &&&&&&&&&&&&&&&&&&&&********************************************
 [DB ERROR] (pymysql.err.IntegrityError) (1452, 'Cannot add or update a child row: a foreign key constraint fails (`pnc_warehouse`.`line_item`, CONSTRAINT `line_item_ibfk_2` FOREIGN KEY (`df_line_item_type_id`) REFERENCES `line_item_type` (`df_line_item_type_id`))')
 [SQL: INSERT INTO line_item (df_line_item_id, df_invoice_id, df_line_item_type_id, source_line_item_id, source_line_item_type, description, amount, df_source_system_id) VALUES (%(df_line_item_id)s, %(df_invoice_id)s, %(df_line_item_type_id)s, %(source_line_item_id)s, line_item.source_line_item_type, %(description)s, %(amount)s, %(df_source_system_id)s)]
 [parameters: {'df_line_item_id': 'ae773f66-3aa0-5efe-8325-3488f92c35ce', 'df_invoice_id': '222ab7b8-5969-5e78-b7c0-7874f508df5e', 'df_line_item_type_id': 'be8c5d0a-6872-5161-b13e-7e180bb833bf', 'source_line_item_id': '461562702-20010525-853259_bp', 'description': 'Base Premium', 'amount': 89.0, 'df_source_system_id': 12}]
@@ -343,3 +338,130 @@ pymysql.err.IntegrityError: (1452, 'Cannot add or update a child row: a foreign 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
+  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 700, in <module>
+    handle({"Records": [{"body": '{"source_line_item_id":"461561106","source_system":"as400_aff"}'}]}, None)
+  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 695, in handle
+    asyncio.run(consume_lambda(config=payload))
+  File "C:\Program Files\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\asyncio\base_events.py", line 685, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 687, in consume_lambda
+    raise e
+  File "c:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer\src\handler.py", line 674, in consume_lambda
+    session.commit()
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 2032, in commit
+    trans.commit(_to_root=True)
+  File "<string>", line 2, in commit
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 1313, in commit
+    self._prepare_impl()
+  File "<string>", line 2, in _prepare_impl
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 1288, in _prepare_impl
+    self.session.flush()
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 4345, in flush
+    self._flush(objects)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 4480, in _flush
+    with util.safe_reraise():
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\util\langhelpers.py", line 224, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\session.py", line 4441, in _flush
+    flush_context.execute()
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\unitofwork.py", line 466, in execute
+    rec.execute(self)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\unitofwork.py", line 642, in execute
+    util.preloaded.orm_persistence.save_obj(
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\persistence.py", line 93, in save_obj
+    _emit_insert_statements(
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\orm\persistence.py", line 1227, in _emit_insert_statements
+    result = connection.execute(
+             ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1415, in execute
+    return meth(
+           ^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\elements.py", line 523, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1637, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1842, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1982, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 2351, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\base.py", line 1963, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\engine\default.py", line 943, in do_execute
+    cursor.execute(statement, parameters)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 153, in execute
+    result = self._query(query)
+             ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\cursors.py", line 322, in _query
+    conn.query(q)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 563, in query
+    self._affected_rows = self._read_query_result(unbuffered=unbuffered)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 825, in _read_query_result
+    result.read()
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 1199, in read
+    first_packet = self.connection._read_packet()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    first_packet = self.connection._read_packet()
+    first_packet = self.connection._read_packet()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
+    packet.raise_for_error()
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\protocol.py", line 219, in raise_for_error
+    first_packet = self.connection._read_packet()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    first_packet = self.connection._read_packet()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
+    packet.raise_for_error()
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\protocol.py", line 219, in raise_for_error
+    err.raise_mysql_exception(self._data)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\err.py", line 150, in raise_mysql_exception
+    raise errorclass(errno, errval)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
+    packet.raise_for_error()
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\connections.py", line 775, in _read_packet
+    packet.raise_for_error()
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\protocol.py", line 219, in raise_for_error
+    err.raise_mysql_exception(self._data)
+  File "C:\Users\A0885080\AppData\Roaming\Python\Python312\site-packages\pymysql\err.py", line 150, in raise_mysql_exception
+    raise errorclass(errno, errval)
+sqlalchemy.exc.IntegrityError: (pymysql.err.IntegrityError) (1452, 'Cannot add or update a child row: a foreign key constraint fails (`pnc_warehouse`.`line_item`, CONSTRAINT `line_item_ibfk_2` FOREIGN KEY (`df_line_item_type_id`) REFERENCES `line_item_type` (`df_line_item_type_id`))')
+[SQL: INSERT INTO line_item (df_line_item_id, df_invoice_id, df_line_item_type_id, source_line_item_id, source_line_item_type, description, amount, df_source_system_id) VALUES (%(df_line_item_id)s, %(df_invoice_id)s, %(df_line_item_type_id)s, %(source_line_item_id)s, line_item.source_line_item_type, %(description)s, %(amount)s, %(df_source_system_id)s)]
+[parameters: {'df_line_item_id': 'ae773f66-3aa0-5efe-8325-3488f92c35ce', 'df_invoice_id': '222ab7b8-5969-5e78-b7c0-7874f508df5e', 'df_line_item_type_id': 'be8c5d0a-6872-5161-b13e-7e180bb833bf', 'source_line_item_id': '461562702-20010525-853259_bp', 'description': 'Base Premium', 'amount': 89.0, 'df_source_system_id': 12}]
+(Background on this error at: https://sqlalche.me/e/20/gkpj)
+(venv) PS C:\Users\A0885080\Downloads\Fixed Repo Git\df_sqs_as400_aff_kkins_lineitemconsumer>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
