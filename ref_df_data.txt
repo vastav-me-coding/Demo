@@ -1,0 +1,1445 @@
+import os
+import logging
+import json
+import time
+import requests
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import BIGINT, create_engine, Column, Integer, String, MetaData, DateTime, Float, Text, DECIMAL, TIMESTAMP, ForeignKey, CHAR, Boolean, Index, Date, BigInteger
+from sqlalchemy.dialects.mysql import TINYINT
+from sqlalchemy.orm import Session, declarative_base, relationship
+from sqlalchemy.orm import sessionmaker
+from df_database_models.secrets_manager import get_secret
+from datetime import datetime
+import pandas as pd
+from sqlalchemy import func
+from sqlalchemy.schema import FetchedValue
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+Base = declarative_base()
+
+pnc_db = os.getenv('RDS_DB_NAME')
+ref_db = os.getenv('RDS_REF_DB_NAME')
+mdm_raw_db = os.getenv('RDS_RAW_DB_NAME')
+mdm_refined_db = os.getenv('RDS_REFINED_DB_NAME')
+
+def nat_to_none(obj):
+    # Replace NaT with None
+    if obj is pd.NaT:
+        return None
+
+    # Dict: process values
+    if isinstance(obj, dict):
+        return {k: nat_to_none(v) for k, v in obj.items()}
+
+    # List or tuple: process items
+    if isinstance(obj, (list, tuple)):
+        t = type(obj)
+        return t(nat_to_none(v) for v in obj)
+
+    # Anything else unchanged
+    return obj
+
+class todictclass:
+    def from_dict(cls, d):
+        # Replace NaT with None in the input dictionary
+        d = nat_to_none(d)
+        du = {}
+        for c in cls.__table__.columns:
+            if c.name not in ['created_at', 'modified_at']:
+                du[c.name] = d[c.name] if c.name in d else getattr(cls, c.name)
+        return cls(**du)   
+
+class Additional_Insured(Base, todictclass):
+    __tablename__ = 'additional_insured'
+
+    df_additional_insured_id = Column(CHAR(36), primary_key=True)
+    df_policy_id = Column(CHAR(36), ForeignKey('policy.df_policy_id'))
+    df_quote_id = Column(CHAR(36), ForeignKey('quote.df_quote_id'))
+    df_customer_id = Column(CHAR(36), ForeignKey('customer.df_customer_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    policy = relationship('Policy')
+    quote = relationship('Quote')
+    customer = relationship('Customer')
+
+class Additional_Interest(Base, todictclass):
+    __tablename__ = 'additional_interest'
+
+    df_additional_interest_id = Column(CHAR(36), primary_key=True)
+    source_additional_interest_id = Column(String(128))
+    source_additional_interest_type = Column(String(128))
+    name = Column(String(256))
+    dba_name = Column(String(256))
+    industry = Column(String(128))
+    naics_code = Column(String(10))
+    sic_code = Column(String(10))
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    source_system = relationship('Source_System')
+
+class Additional_Interest_Type(Base, todictclass):
+    __tablename__ = 'additional_interest_type'
+
+    df_additional_interest_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    additional_interest_type = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Additional_Interest_Xref(Base, todictclass):
+    __tablename__ = 'additional_interest_xref'
+
+    df_additional_interest_xref_id = Column(CHAR(36), primary_key=True)
+    df_policy_id = Column(CHAR(36), ForeignKey('policy.df_policy_id'))
+    df_quote_id = Column(CHAR(36), ForeignKey('quote.df_quote_id'))
+    df_additional_interest_id = Column(CHAR(36), ForeignKey('additional_interest.df_additional_interest_id'), nullable=False)
+    df_additional_interest_type_id = Column(Integer, ForeignKey('additional_interest_type.df_additional_interest_type_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    policy = relationship('Policy')
+    quote = relationship('Quote')
+    additional_interest = relationship('Additional_Interest')
+    additional_interest_type = relationship('Additional_Interest_Type')
+
+class Address(Base, todictclass):
+    __tablename__ = 'address'
+
+    df_address_id = Column(CHAR(36), primary_key=True)
+    address_line_1 = Column(Text)
+    address_line_2 = Column(Text)
+    city = Column(String(128))
+    county = Column(String(128))
+    state = Column(String(64))
+    country = Column(String(64))
+    zip = Column(String(6))
+    zip_plus_4 = Column(String(4))
+    latitude = Column(String(256))
+    longitude = Column(String(256))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Agency(Base, todictclass):
+    __tablename__ = 'agency'
+
+    df_agency_id = Column(CHAR(36), primary_key=True)
+    source_agency_id = Column(String(128))
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    mdm_agency_id = Column(CHAR(36))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    source_system = relationship('Source_System')
+
+class Agency_Contact(Base, todictclass):
+    __tablename__ = 'agency_contact'
+
+    df_agency_contact_id = Column(CHAR(36), primary_key=True)
+    source_agency_contact_id = Column(String(128))
+    df_agency_id = Column(CHAR(36), ForeignKey('agency.df_agency_id'), nullable=False)
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    mdm_agency_contact_id = Column(CHAR(36))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    agency = relationship('Agency')
+    source_system = relationship('Source_System')
+
+class Carrier(Base, todictclass):
+    __tablename__ = 'carrier'
+
+    df_carrier_id = Column(CHAR(36), primary_key=True)
+    source_carrier_id = Column(String(128))
+    carrier_name = Column(String(256))
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    source_system = relationship('Source_System')
+
+class Coverage_Carrier_Allocation(Base, todictclass):
+    __tablename__ = 'coverage_carrier_allocation'
+
+    df_coverage_carrier_allocation_id = Column(CHAR(36), primary_key=True)
+    df_carrier_id = Column(CHAR(36), ForeignKey('carrier.df_carrier_id'))
+    df_transaction_coverage_id = Column(CHAR(36), ForeignKey('transaction_coverage.df_transaction_coverage_id'))
+    participant_percentage = Column(DECIMAL(5, 2))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    carrier = relationship('Carrier')
+    transaction_coverage = relationship('Transaction_Coverage')
+
+class Customer(Base, todictclass):
+    __tablename__ = 'customer'
+
+    df_customer_id = Column(CHAR(36), primary_key=True)
+    source_customer_id = Column(String(128))
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    mdm_customer_id = Column(CHAR(36))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    source_system = relationship('Source_System')
+
+class Customer_Contact(Base, todictclass):
+    __tablename__ = 'customer_contact'
+
+    df_customer_contact_id = Column(CHAR(36), primary_key=True)
+    source_customer_contact_id = Column(String(128))
+    df_customer_id = Column(CHAR(36), ForeignKey('customer.df_customer_id'))
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    mdm_customer_contact_id = Column(CHAR(36))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    customer = relationship('Customer')
+    source_system = relationship('Source_System')
+
+class Invoice(Base, todictclass):
+    __tablename__ = 'invoice'
+
+    df_invoice_id = Column(CHAR(36), primary_key=True)
+    source_invoice_id = Column(String(64))
+    invoice_number = Column(String(64))
+    df_transaction_id = Column(CHAR(36), ForeignKey('transaction.df_transaction_id'))
+    order_date = Column(DateTime)
+    total_amount_due = Column(DECIMAL(18, 5))
+    due_date = Column(DateTime)
+    df_invoice_status_id = Column(Integer, ForeignKey('invoice_status.df_invoice_status_id'), nullable=False)
+    source_invoice_status = Column(String(64))
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    transaction = relationship('Transaction')
+    invoice_status = relationship('Invoice_Status')
+    source_system = relationship('Source_System')
+
+class Invoice_Status(Base, todictclass):
+    __tablename__ = 'invoice_status'
+
+    df_invoice_status_id = Column(Integer, primary_key=True, autoincrement=True)
+    invoice_status = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Policy_Transaction_Summary(Base, todictclass):
+    __tablename__ = 'policy_transaction_summary'
+
+    df_policy_id = Column(CHAR(36), primary_key=True)
+    latest_source_transaction_id = Column(String(128))
+    future_source_transaction_id = Column(String(128))
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    source_system = relationship('Source_System')
+    
+class Line_Item(Base, todictclass):
+    __tablename__ = 'line_item'
+
+    df_line_item_id = Column(CHAR(36), primary_key=True)
+    df_invoice_id = Column(CHAR(36), ForeignKey('invoice.df_invoice_id'))
+    df_line_item_type_id = Column(Integer, ForeignKey('line_item_type.df_line_item_type_id'))
+    source_line_item_id = Column(String(128))
+    source_line_item_type = Column(String(64))
+    description = Column(String(256))
+    amount = Column(DECIMAL(18, 5))
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    invoice = relationship('Invoice')
+    line_item_type = relationship('Line_Item_Type')
+    source_system = relationship('Source_System')
+
+class Line_Item_Type(Base, todictclass):
+    __tablename__ = 'line_item_type'
+
+    df_line_item_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    line_item_type = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Payment(Base, todictclass):
+    __tablename__ = 'payment'
+
+    df_payment_id = Column(CHAR(36), primary_key=True)
+    source_payment_id = Column(String(128))
+    df_invoice_id = Column(CHAR(36), ForeignKey('invoice.df_invoice_id'))
+    df_payment_type_id = Column(Integer, ForeignKey('payment_type.df_payment_type_id'))
+    df_payment_status_id = Column(Integer, ForeignKey('payment_status.df_payment_status_id'), nullable=False)
+    source_payment_type = Column(String(64))
+    source_payment_status = Column(String(32))
+    payment_amount = Column(DECIMAL(18, 5))
+    payment_date = Column(DateTime)
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    invoice = relationship('Invoice')
+    payment_type = relationship('Payment_Type')
+    payment_status = relationship('Payment_Status')
+    source_system = relationship('Source_System')
+
+class Payment_Status(Base, todictclass):
+    __tablename__ = 'payment_status'
+
+    df_payment_status_id = Column(Integer, primary_key=True, autoincrement=True)
+    payment_status = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Payment_Type(Base, todictclass):
+    __tablename__ = 'payment_type'
+
+    df_payment_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    payment_type = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Policy(Base, todictclass):
+    __tablename__ = 'policy'
+
+    df_policy_id = Column(CHAR(36), primary_key=True)
+    policy_number = Column(String(128))
+    df_policy_status_id = Column(Integer, ForeignKey('policy_status.df_policy_status_id'), nullable=False)
+    source_policy_status = Column(String(64))
+    product_id = Column(CHAR(36), nullable=False)
+    df_agency_id = Column(CHAR(36), ForeignKey('agency.df_agency_id'))
+    df_agency_contact_id = Column(CHAR(36), ForeignKey('agency_contact.df_agency_contact_id'))
+    df_customer_id = Column(CHAR(36), ForeignKey('customer.df_customer_id'), nullable=False)
+    policy_issue_date = Column(DateTime)
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    policy_status = relationship('Policy_Status')
+    agency = relationship('Agency')
+    agency_contact = relationship('Agency_Contact')
+    customer = relationship('Customer')
+    source_system = relationship('Source_System')
+
+class Policy_Location(Base, todictclass):
+    __tablename__ = 'policy_location'
+
+    df_policy_location_id = Column(CHAR(36), primary_key=True)
+    df_address_id = Column(CHAR(36), ForeignKey('address.df_address_id'), nullable=False)
+    df_policy_id = Column(CHAR(36), ForeignKey('policy.df_policy_id'), nullable=False)
+    is_primary = Column(TINYINT(1))
+    effective_date = Column(DateTime)
+    expiration_date = Column(DateTime)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    policy = relationship('Policy')
+    address = relationship('Address')
+
+class Policy_Number_Version(Base, todictclass):
+    __tablename__ = 'policy_number_version'
+
+    df_policy_number_version_id = Column(CHAR(36), primary_key=True)
+    policy_number = Column(String(128), nullable=False)
+    df_policy_id = Column(CHAR(36), ForeignKey('policy.df_policy_id'), nullable=False)
+    policy_version_number = Column(String(6))
+    policy_effective_date = Column(DateTime)
+    policy_expiration_date = Column(DateTime)
+    is_surplus_lines = Column(TINYINT(1))
+    is_latest = Column(TINYINT(1))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    policy = relationship('Policy')
+
+class Policy_Status(Base, todictclass):
+    __tablename__ = 'policy_status'
+
+    df_policy_status_id = Column(Integer, primary_key=True, autoincrement=True)
+    policy_status = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+# class Product(Base, todictclass):
+#     __tablename__ = 'product'
+
+#     product_id = Column(CHAR(36), primary_key=True)
+#     business_unit = Column(String(128))
+#     business_segment = Column(String(128))
+#     business_subsegment = Column(String(100))
+#     program_name = Column(String(128))
+#     product_name = Column(String(128))
+
+class Quote(Base, todictclass):
+    __tablename__ = 'quote'
+
+    df_quote_id = Column(CHAR(36), primary_key=True)
+    source_quote_id = Column(String(128))
+    quote_number = Column(String(128))
+    df_submission_id = Column(CHAR(36), ForeignKey('submission.df_submission_id'), nullable=False)
+    received_date = Column(DateTime)
+    effective_date = Column(DateTime)
+    expiration_date = Column(DateTime)
+    df_quote_status_id = Column(Integer, ForeignKey('quote_status.df_quote_status_id'), nullable=False)
+    source_quote_status = Column(String(64))
+    df_quote_type_id = Column(Integer, ForeignKey('quote_type.df_quote_type_id'), nullable=False)
+    source_quote_type = Column(String(64))
+    admin_override_rule = Column(Boolean)
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    submission = relationship('Submission')
+    quote_status = relationship('Quote_Status')
+    quote_type = relationship('Quote_Type')
+    source_system = relationship('Source_System')
+
+class Quote_Premium(Base, todictclass):
+    __tablename__ = 'quote_premium'
+
+    df_quote_premium_id = Column(CHAR(36), primary_key=True)
+    df_quote_id = Column(CHAR(36), ForeignKey('quote.df_quote_id'), nullable=False)
+    df_line_item_id = Column(CHAR(36), ForeignKey('line_item.df_line_item_id'))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    quote = relationship('Quote')
+    line_item = relationship('Line_Item')
+
+class Quote_Status(Base, todictclass):
+    __tablename__ = 'quote_status'
+
+    df_quote_status_id = Column(Integer, primary_key=True, autoincrement=True)
+    quote_status = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Quote_Type(Base, todictclass):
+    __tablename__ = 'quote_type'
+
+    df_quote_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    quote_type = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Source_System(Base, todictclass):
+    __tablename__ = 'source_system'
+
+    df_source_system_id = Column(Integer, primary_key=True, autoincrement=True)
+    source_system = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Submission(Base, todictclass):
+    __tablename__ = 'submission'
+
+    df_submission_id = Column(CHAR(36), primary_key=True)
+    source_submission_id = Column(String(128))
+    submission_number = Column(String(128))
+    df_submission_status_id = Column(Integer, ForeignKey('submission_status.df_submission_status_id'), nullable=False)
+    source_submission_status = Column(String(32))
+    df_submission_type_id = Column(Integer, ForeignKey('submission_type.df_submission_type_id'), nullable=False)
+    source_submission_type = Column(String(128))
+    df_customer_id = Column(CHAR(36), ForeignKey('customer.df_customer_id'))
+    product_id = Column(CHAR(36))
+    df_agency_id = Column(CHAR(36), ForeignKey('agency.df_agency_id'))
+    df_agency_contact_id = Column(CHAR(36), ForeignKey('agency_contact.df_agency_contact_id'))
+    submission_email = Column(String(256))
+    application_received_date = Column(DateTime)
+    effective_date = Column(DateTime)
+    expiration_date = Column(DateTime)
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    submission_status = relationship('Submission_Status')
+    submission_type = relationship('Submission_Type')
+    customer = relationship('Customer')
+    agency = relationship('Agency')
+    agency_contact = relationship('Agency_Contact')
+    source_system = relationship('Source_System')
+
+class Submission_Status(Base, todictclass):
+    __tablename__ = 'submission_status'
+
+    df_submission_status_id = Column(Integer, primary_key=True, autoincrement=True)
+    submission_status = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Submission_Type(Base, todictclass):
+    __tablename__ = 'submission_type'
+
+    df_submission_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    submission_type = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Transaction(Base, todictclass):
+    __tablename__ = 'transaction'
+
+    df_transaction_id = Column(CHAR(36), primary_key=True)
+    source_transaction_id = Column(String(128))
+    df_transaction_type_id = Column(Integer, ForeignKey('transaction_type.df_transaction_type_id'), nullable=False)
+    source_transaction_type = Column(String(64))
+    df_submission_id = Column(CHAR(36), ForeignKey('submission.df_submission_id'))
+    df_policy_id = Column(CHAR(36), ForeignKey('policy.df_policy_id'))
+    df_underwriter_id = Column(CHAR(36), ForeignKey('underwriter.df_underwriter_id'))
+    transaction_date = Column(DateTime)
+    effective_date = Column(DateTime)
+    expiration_date = Column(DateTime)
+    sequence_id = Column(String(2))
+    is_latest_transaction = Column(Boolean)
+    is_future_transaction = Column(Boolean)
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    transaction_type = relationship('Transaction_Type')
+    submission = relationship('Submission')
+    policy = relationship('Policy')
+    underwriter = relationship('Underwriter')
+    source_system = relationship('Source_System')
+
+class Transaction_Coverage(Base, todictclass):
+    __tablename__ = 'transaction_coverage'
+
+    df_transaction_coverage_id = Column(CHAR(36), primary_key=True)
+    coverage_id = Column(CHAR(36), ForeignKey(f'{ref_db}.coverage.coverage_id'), nullable=False)
+    df_transaction_id = Column(CHAR(36), ForeignKey('transaction.df_transaction_id'), nullable=False)
+    limits = Column(DECIMAL(18, 5))
+    deductable = Column(DECIMAL(18, 5))
+    per_occurance = Column(DECIMAL(18, 5))
+    premium = Column(DECIMAL(18, 5))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    coverage = relationship('Coverage_Ref')
+    transaction = relationship('Transaction')
+
+class Transaction_Subcoverage(Base, todictclass):
+    __tablename__ = 'transaction_subcoverage'
+
+    df_transaction_subcoverage_id = Column(CHAR(36), primary_key=True)
+    subcoverage_id = Column(CHAR(36), ForeignKey(f'{ref_db}.subcoverage.subcoverage_id'), nullable=False)
+    df_transaction_id = Column(CHAR(36), ForeignKey('transaction.df_transaction_id'), nullable=False)
+    limits = Column(DECIMAL(18, 5))
+    deductable = Column(DECIMAL(18, 5))
+    per_occurance = Column(DECIMAL(18, 5))
+    premium = Column(DECIMAL(18, 5))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    subcoverage = relationship('Subcoverage_Ref')
+    transaction = relationship('Transaction')
+
+class Transaction_Type(Base, todictclass):
+    __tablename__ = 'transaction_type'
+
+    df_transaction_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    transaction_type = Column(String(128))
+    created_at = Column(DateTime)
+    modified_at = Column(DateTime)
+
+class Underwriter(Base, todictclass):
+    __tablename__ = 'underwriter'
+
+    df_underwriter_id = Column(CHAR(36), primary_key=True)
+    name = Column(String(256))
+    source_underwriter_id = Column(String(128))
+    is_primary = Column(Boolean)
+    df_source_system_id = Column(Integer, ForeignKey('source_system.df_source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    source_system = relationship('Source_System')
+
+class broker_portal_error_log(Base, todictclass):
+    __tablename__ = "broker_portal_error_log"
+    log_id = Column(BIGINT, autoincrement=True, primary_key=True)
+    transaction_id = Column(String)
+    source_policy_id = Column(String)
+    policy_id = Column(String)
+    error_message = Column(String)
+
+
+#ref_data models
+
+class Coverage_Ref(Base, todictclass):
+    __tablename__ = 'coverage'
+    __table_args__ = {'schema': ref_db}
+
+    coverage_id = Column(CHAR(36), primary_key=True)
+    coverage_name = Column(String(128))
+    coverage_code = Column(String(64))
+    naics_code = Column(String(10))
+
+class Subcoverage_Ref(Base, todictclass):
+    __tablename__ = 'subcoverage'
+    __table_args__ = {'schema': ref_db}
+
+    subcoverage_id = Column(CHAR(36), primary_key=True)
+    subcoverage_name = Column(String(128))
+    subcoverage_code = Column(String(64))
+    naics_code = Column(String(10))
+
+class Product_Ref(Base, todictclass):
+    __tablename__ = 'product'
+    __table_args__ = {'schema': ref_db}
+
+    product_id = Column(String(255), primary_key=True)
+    business_unit = Column(String(255))
+    business_segment = Column(String(255))
+    business_subsegment = Column(String(255))
+    program_name = Column(String(255))
+    product_name = Column(String(255))
+
+class Product_Content_Management_Ref(Base, todictclass):
+    __tablename__ = 'product_content_management'
+    __table_args__ = {'schema': ref_db}
+
+    product_id = Column(String(36), primary_key=True)
+    display_name = Column(String(255))
+    accepts_competitor_application = Column(String(255))
+    application_url = Column(String(255))
+    approver_email = Column(String(255))
+    description = Column(Text)
+    product_target_customer = Column(String(512))
+    product_agency_onboarding = Column(Text)
+    home_url = Column(String(512))
+    public_email = Column(String(255))
+    public_phone_number = Column(String(100))
+    stp_url = Column(String(255))
+    keyword = Column(Text)
+    acord_based = Column(String(255))
+    cross_sell_recommended = Column(String(255))
+    product_broker_distribution = Column(String(255))
+    individual_distributed = Column(String(1))
+    firms_distributed = Column(String(1))
+    is_searchable = Column(String(1))
+    actively_sold = Column(String(8))
+    capacity_aggregate_management = Column(String(255))
+    highlights = Column(Text)
+    differentiators = Column(Text)
+    image_url = Column(String(512))
+    logo_url = Column(String(512))
+    comments = Column(Text)
+    billing_type = Column(String(64))
+
+class Product_Coverage_Ref(Base, todictclass):
+    __tablename__ = 'product_coverage'
+    __table_args__ = {'schema': ref_db}
+
+    product_coverage_id = Column(CHAR(36), primary_key=True)
+    product_id = Column(String(36))
+    coverage_id = Column(CHAR(36), ForeignKey(f'{ref_db}.coverage.coverage_id'), nullable=False)
+    is_mandatory = Column(Boolean)
+
+    coverage = relationship('Coverage_Ref')
+
+class Product_Coverage_Subcoverage_Ref(Base, todictclass):
+    __tablename__ = 'product_coverage_subcoverage'
+    __table_args__ = {'schema': ref_db}
+
+    product_coverage_subcoverage_id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(String(36))
+    coverage_id = Column(CHAR(36), ForeignKey(f'{ref_db}.coverage.coverage_id'), nullable=False)
+    subcoverage_id = Column(CHAR(36), ForeignKey(f'{ref_db}.subcoverage.subcoverage_id'), nullable=False)
+    is_mandatory = Column(Boolean)
+
+    coverage = relationship('Coverage_Ref')
+    subcoverage = relationship('Subcoverage_Ref')
+
+#mdm_raw models
+
+class Agency_Raw(Base, todictclass):
+    __tablename__ = 'agency'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    raw_agency_id = Column(CHAR(36), primary_key=True)
+    parent_agency_id = Column(String(64))
+    source_agency_id = Column(String(64))
+    legal_name = Column(String(512))
+    dba_name = Column(String(512))
+    source_company_type = Column(String(256))
+    website = Column(String(128))
+    linkedin_url = Column(String(512))
+    facebook_url = Column(String(512))
+    email_marketing = Column(String(128))
+    email_operational = Column(String(128))
+    premises_address_line_1 = Column(Text)
+    premises_address_line_2 = Column(Text)
+    premises_city = Column(String(128))
+    premises_county = Column(String(128))
+    premises_state = Column(String(64))
+    premises_country = Column(String(64))
+    premises_zip = Column(String(10))
+    premises_latitude = Column(String(256))
+    premises_longitude = Column(String(256))
+    premises_phone = Column(String(30))
+    premises_fax = Column(String(30))
+    mailing_address_line_1 = Column(Text)
+    mailing_address_line_2 = Column(Text)
+    mailing_city = Column(String(128))
+    mailing_county = Column(String(128))
+    mailing_state = Column(String(64))
+    mailing_country = Column(String(64))
+    mailing_zip = Column(String(10))
+    mailing_latitude = Column(String(256))
+    mailing_longitude = Column(String(256))
+    mailing_phone = Column(String(30))
+    mailing_fax = Column(String(30))
+    billing_address_line_1 = Column(Text)
+    billing_address_line_2 = Column(Text)
+    billing_city = Column(String(128))
+    billing_county = Column(String(128))
+    billing_state = Column(String(64))
+    billing_country = Column(String(64))
+    billing_zip = Column(String(10))
+    billing_latitude = Column(String(256))
+    billing_longitude = Column(String(256))
+    billing_phone = Column(String(30))
+    billing_fax = Column(String(30))
+    status = Column(String(16))
+    status_valid_from = Column(DateTime)
+    status_valid_to = Column(DateTime)
+    source_system_id = Column(Integer, ForeignKey(f'{mdm_raw_db}.source_system.source_system_id'))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    source_system = relationship('Source_System_Raw')
+
+class Agency_Company_Raw(Base, todictclass):
+    __tablename__ = 'agency_company'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    raw_agency_company_id = Column(CHAR(36), primary_key=True)
+    source_agency_id = Column(String(64))
+    retail_broker_company = Column(String(64))
+    company_id = Column(String(255))
+    company_name = Column(String(255))
+    organization_id = Column(String(255))
+    organization_abbr_name = Column(String(255))
+    organization_name = Column(String(255))
+    business_unit = Column(String(255))
+    source_system_id = Column(Integer, ForeignKey(f'{mdm_raw_db}.source_system.source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    source_system = relationship('Source_System_Raw')
+
+class Agency_Contact_Raw(Base, todictclass):
+    __tablename__ = 'agency_contact'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    raw_agency_contact_id = Column(CHAR(36), primary_key=True)
+    source_agency_contact_id = Column(String(64))
+    source_agency_id = Column(String(64))
+    first_name = Column(String(128))
+    middle_name = Column(String(128))
+    last_name = Column(String(128))
+    full_name = Column(String(512))
+    source_contact_type = Column(String(64))
+    email = Column(String(128))
+    email_marketing = Column(String(128))
+    email_operational = Column(String(128))
+    linkedin_url = Column(String(512))
+    premises_address_line_1 = Column(Text)
+    premises_address_line_2 = Column(Text)
+    premises_city = Column(String(128))
+    premises_county = Column(String(128))
+    premises_state = Column(String(64))
+    premises_country = Column(String(64))
+    premises_zip = Column(String(10))
+    premises_latitude = Column(String(256))
+    premises_longitude = Column(String(256))
+    mailing_address_line_1 = Column(Text)
+    mailing_address_line_2 = Column(Text)
+    mailing_city = Column(String(128))
+    mailing_county = Column(String(128))
+    mailing_state = Column(String(64))
+    mailing_country = Column(String(64))
+    mailing_zip = Column(String(10))
+    mailing_latitude = Column(String(256))
+    mailing_longitude = Column(String(256))
+    billing_address_line_1 = Column(Text)
+    billing_address_line_2 = Column(Text)
+    billing_city = Column(String(128))
+    billing_county = Column(String(128))
+    billing_state = Column(String(64))
+    billing_country = Column(String(64))
+    billing_zip = Column(String(10))
+    billing_latitude = Column(String(256))
+    billing_longitude = Column(String(256))
+    home_phone = Column(String(30))
+    work_phone = Column(String(30))
+    mobile_phone = Column(String(30))
+    fax = Column(String(30))
+    status = Column(String(16))
+    status_valid_from = Column(DateTime)
+    status_valid_to = Column(DateTime)
+    source_system_id = Column(Integer, ForeignKey(f'{mdm_raw_db}.source_system.source_system_id'))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    source_system = relationship('Source_System_Raw')
+
+class Agency_Contact_Identifier_Raw(Base, todictclass):
+    __tablename__ = 'agency_contact_identifier'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    agency_contact_identifier_id = Column(CHAR(36), primary_key=True)
+    raw_agency_contact_id = Column(CHAR(36))
+    identifier_type_id = Column(Integer)
+    identifier_value = Column(String(64))
+    registration_authority = Column(String(128))
+    valid_from = Column(DateTime)
+    valid_to = Column(DateTime)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Agency_Contact_Licenses_Raw(Base, todictclass):
+    __tablename__ = 'agency_contact_licenses'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    agency_contact_licenses_id = Column(CHAR(36), primary_key=True)
+    entity_name = Column(String(20))
+    entity_id = Column(String(64))
+    npn = Column(String(10))
+    license_number = Column(String(64))
+    license_type = Column(String(64))
+    line_of_authority = Column(String(512))
+    effective_date = Column(DateTime)
+    expiration_date = Column(DateTime)
+    status = Column(String(16))
+    state = Column(String(64))
+    is_resident = Column(Boolean)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Agency_Identifier_Raw(Base, todictclass):
+    __tablename__ = 'agency_identifier'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    agency_identifier_id = Column(CHAR(36), primary_key=True)
+    raw_agency_id = Column(CHAR(36))
+    identifier_type_id = Column(Integer)
+    identifier_value = Column(String(64))
+    registration_authority = Column(String(128))
+    valid_from = Column(DateTime)
+    valid_to = Column(DateTime)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Customer_Raw(Base, todictclass):
+    __tablename__ = 'customer'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    raw_customer_id = Column(CHAR(36), primary_key=True)
+    customer_name = Column(String(512))
+    source_customer_id = Column(String(64))
+    dba_name = Column(String(512))
+    source_company_type = Column(String(128))
+    website = Column(String(128))
+    linkedin_url = Column(String(512))
+    facebook_url = Column(String(512))
+    email = Column(String(128))
+    email_marketing = Column(String(128))
+    email_operational = Column(String(128))
+    premises_address_line_1 = Column(Text)
+    premises_address_line_2 = Column(Text)
+    premises_city = Column(String(128))
+    premises_county = Column(String(128))
+    premises_state = Column(String(64))
+    premises_country = Column(String(64))
+    premises_zip = Column(String(10))
+    premises_latitude = Column(String(256))
+    premises_longitude = Column(String(256))
+    premises_phone = Column(String(30))
+    premises_fax = Column(String(30))
+    mailing_address_line_1 = Column(Text)
+    mailing_address_line_2 = Column(Text)
+    mailing_city = Column(String(128))
+    mailing_county = Column(String(128))
+    mailing_state = Column(String(64))
+    mailing_country = Column(String(64))
+    mailing_zip = Column(String(10))
+    mailing_latitude = Column(String(256))
+    mailing_longitude = Column(String(256))
+    mailing_phone = Column(String(30))
+    mailing_fax = Column(String(30))
+    billing_address_line_1 = Column(Text)
+    billing_address_line_2 = Column(Text)
+    billing_city = Column(String(128))
+    billing_county = Column(String(128))
+    billing_state = Column(String(64))
+    billing_country = Column(String(64))
+    billing_zip = Column(String(10))
+    billing_latitude = Column(String(256))
+    billing_longitude = Column(String(256))
+    billing_phone = Column(String(30))
+    billing_fax = Column(String(30))
+    status = Column(String(16))
+    status_valid_from = Column(DateTime)
+    status_valid_to = Column(DateTime)
+    source_system_id = Column(Integer, ForeignKey(f'{mdm_raw_db}.source_system.source_system_id'))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    source_system = relationship('Source_System_Raw')
+
+class Customer_Contact_Raw(Base, todictclass):
+    __tablename__ = 'customer_contact'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    raw_customer_contact_id = Column(CHAR(36), primary_key=True)
+    source_customer_contact_id = Column(String(64))
+    raw_customer_id = Column(String(64))
+    first_name = Column(String(128))
+    middle_name = Column(String(128))
+    last_name = Column(String(128))
+    full_name = Column(String(512))
+    date_of_birth = Column(Date)
+    source_contact_type = Column(String(64))
+    email = Column(String(128))
+    linkedin_url = Column(String(512))
+    premises_address_line_1 = Column(Text)
+    premises_address_line_2 = Column(Text)
+    premises_city = Column(String(128))
+    premises_county = Column(String(128))
+    premises_state = Column(String(64))
+    premises_country = Column(String(64))
+    premises_zip = Column(String(10))
+    premises_latitude = Column(String(256))
+    premises_longitude = Column(String(256))
+    mailing_address_line_1 = Column(Text)
+    mailing_address_line_2 = Column(Text)
+    mailing_city = Column(String(128))
+    mailing_county = Column(String(128))
+    mailing_state = Column(String(64))
+    mailing_country = Column(String(64))
+    mailing_zip = Column(String(10))
+    mailing_latitude = Column(String(256))
+    mailing_longitude = Column(String(256))
+    billing_address_line_1 = Column(Text)
+    billing_address_line_2 = Column(Text)
+    billing_city = Column(String(128))
+    billing_county = Column(String(128))
+    billing_state = Column(String(64))
+    billing_country = Column(String(64))
+    billing_zip = Column(String(10))
+    billing_latitude = Column(String(256))
+    billing_longitude = Column(String(256))
+    home_phone = Column(String(30))
+    work_phone = Column(String(30))
+    mobile_phone = Column(String(30))
+    fax = Column(String(30))
+    status = Column(String(16))
+    status_valid_from = Column(DateTime)
+    status_valid_to = Column(DateTime)
+    source_system_id = Column(Integer, ForeignKey(f'{mdm_raw_db}.source_system.source_system_id'))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    source_system = relationship('Source_System_Raw')
+
+class Customer_Identifier_Raw(Base, todictclass):
+    __tablename__ = 'customer_identifier'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    customer_identifier_id = Column(CHAR(36), primary_key=True)
+    raw_customer_id = Column(CHAR(36))
+    identifier_type_id = Column(Integer)
+    identifier_value = Column(String(64))
+    registration_authority = Column(String(128))
+    valid_from = Column(DateTime)
+    valid_to = Column(DateTime)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Identifier_Type_Raw(Base, todictclass):
+    __tablename__ = 'identifier_type'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    identifier_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    identifier_type = Column(String(64))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Portal_User_Raw(Base, todictclass):
+    __tablename__ = 'portal_user'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    portal_user_id = Column(CHAR(36), primary_key=True)
+    auth_id = Column(String(64), nullable=False)
+    login_email = Column(String(128))
+    first_name = Column(String(128))
+    middle_name = Column(String(128))
+    last_name = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Portal_User_Xref_Raw(Base, todictclass):
+    __tablename__ = 'portal_user_xref'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    portal_user_xref_id = Column(CHAR(36), primary_key=True)
+    portal_user_id = Column(String(64))
+    submission_id = Column(String(64))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+    comment = Column(Text)
+
+class Sf_Agency_Pms_Id_Raw(Base, todictclass):
+    __tablename__ = 'sf_agency_pms_id'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    sf_agency_pms_id = Column(CHAR(36), primary_key=True)
+    salesforce_agency_id = Column(String(64), nullable=False)
+    source_agency_id = Column(String(64))
+    retail_broker_company = Column(String(64))
+    business_unit = Column(String(64))
+    source_system_id = Column(Integer, ForeignKey(f'{mdm_raw_db}.source_system.source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    source_system = relationship('Source_System_Raw')
+
+class Source_System_Raw(Base, todictclass):
+    __tablename__ = 'source_system'
+    __table_args__ = {'schema': mdm_raw_db}
+
+    source_system_id = Column(Integer, primary_key=True, autoincrement=True)
+    source_system = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+#mdm_refined models
+
+class Agency_Refined(Base, todictclass):
+    __tablename__ = 'agency'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    mdm_agency_id = Column(String(64), primary_key=True)
+    parent_agency_id = Column(String(64))
+    legal_name = Column(String(512))
+    dba_name = Column(String(512))
+    company_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.company_type.company_type_id'))
+    industry_type = Column(String(128))
+    sic_code = Column(String(64))
+    naics_code = Column(String(64))
+    status_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.status.status_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    company_type = relationship('Company_Type_Refined')
+    status = relationship('Status_Refined')
+
+class Agency_Address_Refined(Base, todictclass):
+    __tablename__ = 'agency_address'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    agency_address_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_agency_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.agency.mdm_agency_id'), nullable=False)
+    physical_address_id = Column(BigInteger, ForeignKey(f'{mdm_refined_db}.physical_address.physical_address_id'), nullable=False)
+    physical_address_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.physical_address_type.physical_address_type_id'), nullable=False)
+    is_primary = Column(Boolean)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    agency = relationship('Agency_Refined')
+    physical_address = relationship('Physical_Address_Refined')
+    physical_address_type = relationship('Physical_Address_Type_Refined')
+
+class Agency_Contact_Refined(Base, todictclass):
+    __tablename__ = 'agency_contact'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    mdm_agency_contact_id = Column(String(64), primary_key=True)
+    contact_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.contact_type.contact_type_id'))
+    first_name = Column(String(128))
+    middle_name = Column(String(128))
+    last_name = Column(String(128))
+    full_name = Column(String(512))
+    login_email = Column(String(128))
+    auth_id = Column(String(64))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    contact_type = relationship('Contact_Type_Refined')
+
+class Agency_Contact_Address_Refined(Base, todictclass):
+    __tablename__ = 'agency_contact_address'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    agency_contact_address_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_agency_contact_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.agency_contact.mdm_agency_contact_id'), nullable=False)
+    physical_address_id = Column(BigInteger, ForeignKey(f'{mdm_refined_db}.physical_address.physical_address_id'), nullable=False)
+    physical_address_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.physical_address_type.physical_address_type_id'), nullable=False)
+    is_primary = Column(Boolean)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    agency_contact = relationship('Agency_Contact_Refined')
+    physical_address = relationship('Physical_Address_Refined')
+    physical_address_type = relationship('Physical_Address_Type_Refined')
+
+class Agency_Contact_Digital_Profile_Refined(Base, todictclass):
+    __tablename__ = 'agency_contact_digital_profile'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    agency_contact_digital_profile_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_agency_contact_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.agency_contact.mdm_agency_contact_id'), nullable=False)
+    digital_platform_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.digital_platform.digital_platform_id'), nullable=False)
+    digital_platform_value = Column(String(64))
+    is_primary = Column(Boolean)
+    is_email_valid = Column(Boolean)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    agency_contact = relationship('Agency_Contact_Refined')
+    digital_platform = relationship('Digital_Platform_Refined')
+
+class Agency_Contact_Identifier_Refined(Base, todictclass):
+    __tablename__ = 'agency_contact_identifier'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    agency_contact_identifier_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_agency_contact_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.agency_contact.mdm_agency_contact_id'), nullable=False)
+    identifier_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.identifier_type.identifier_type_id'), nullable=False)
+    identifier_value = Column(String(64))
+    registration_authority = Column(String(128))
+    valid_from = Column(DateTime)
+    valid_to = Column(DateTime)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    agency_contact = relationship('Agency_Contact_Refined')
+    identifier_type = relationship('Identifier_Type_Refined')
+
+class Agency_Contact_Licenses_Refined(Base, todictclass):
+    __tablename__ = 'agency_contact_licenses'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    agency_contact_licenses_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    entity_name = Column(String(20))
+    entity_id = Column(String(64))
+    npn = Column(String(10))
+    licence_type = Column(String(64))
+    line_of_authority = Column(String(512))
+    effective_date = Column(DateTime)
+    expiration_date = Column(DateTime)
+    status = Column(String(16))
+    state = Column(String(64))
+    is_resident = Column(Boolean)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Agency_Contact_Phone_Refined(Base, todictclass):
+    __tablename__ = 'agency_contact_phone'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    agency_contact_phone_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_agency_contact_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.agency_contact.mdm_agency_contact_id'), nullable=False)
+    phone_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.phone_type.phone_type_id'), nullable=False)
+    country_code = Column(String(5))
+    area_code = Column(String(10))
+    local_number = Column(String(15))
+    extension = Column(String(10))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    agency_contact = relationship('Agency_Contact_Refined')
+    phone_type = relationship('Phone_Type_Refined')
+
+class Agency_Contact_Xref_Refined(Base, todictclass):
+    __tablename__ = 'agency_contact_xref'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    agency_contact_xref_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_agency_contact_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.agency_contact.mdm_agency_contact_id'), nullable=False)
+    mdm_agency_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.agency.mdm_agency_id'), nullable=False)
+    contact_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.contact_type.contact_type_id'))
+    status_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.status.status_id'), nullable=False)
+    status_valid_from = Column(DateTime)
+    status_valid_to = Column(DateTime)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    agency_contact = relationship('Agency_Contact_Refined')
+    agency = relationship('Agency_Refined')
+    contact_type = relationship('Contact_Type_Refined')
+    status = relationship('Status_Refined')
+
+class Agency_Digital_Profile_Refined(Base, todictclass):
+    __tablename__ = 'agency_digital_profile'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    agency_digital_profile_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_agency_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.agency.mdm_agency_id'), nullable=False)
+    digital_platform_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.digital_platform.digital_platform_id'), nullable=False)
+    digital_platform_value = Column(String(64))
+    is_primary = Column(Boolean)
+    is_email_valid = Column(Boolean)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    agency = relationship('Agency_Refined')
+    digital_platform = relationship('Digital_Platform_Refined')
+
+class Agency_Identifier_Refined(Base, todictclass):
+    __tablename__ = 'agency_identifier'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    agency_identifier_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_agency_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.agency.mdm_agency_id'), nullable=False)
+    identifier_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.identifier_type.identifier_type_id'), nullable=False)
+    identifier_value = Column(String(64))
+    registration_authority = Column(String(128))
+    valid_from = Column(DateTime)
+    valid_to = Column(DateTime)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    agency = relationship('Agency_Refined')
+    identifier_type = relationship('Identifier_Type_Refined')
+
+class Agency_Phone_Refined(Base, todictclass):
+    __tablename__ = 'agency_phone'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    agency_phone_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_agency_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.agency.mdm_agency_id'), nullable=False)
+    phone_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.phone_type.phone_type_id'), nullable=False)
+    country_code = Column(String(5))
+    area_code = Column(String(10))
+    local_number = Column(String(15))
+    extension = Column(String(10))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    agency = relationship('Agency_Refined')
+    phone_type = relationship('Phone_Type_Refined')
+
+class Company_Type_Refined(Base, todictclass):
+    __tablename__ = 'company_type'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    company_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    company_type = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Contact_Type_Refined(Base, todictclass):
+    __tablename__ = 'contact_type'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    contact_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    contact_type = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Customer_Refined(Base, todictclass):
+    __tablename__ = 'customer'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    mdm_customer_id = Column(String(64), primary_key=True)
+    customer_name = Column(String(512))
+    dba_name = Column(String(512))
+    company_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.company_type.company_type_id'))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    company_type = relationship('Company_Type_Refined')
+
+class Customer_Address_Refined(Base, todictclass):
+    __tablename__ = 'customer_address'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    customer_address_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_customer_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.customer.mdm_customer_id'), nullable=False)
+    physical_address_id = Column(BigInteger, ForeignKey(f'{mdm_refined_db}.physical_address.physical_address_id'), nullable=False)
+    physical_address_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.physical_address_type.physical_address_type_id'), nullable=False)
+    is_primary = Column(Boolean)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    customer = relationship('Customer_Refined')
+    physical_address = relationship('Physical_Address_Refined')
+    physical_address_type = relationship('Physical_Address_Type_Refined')
+
+class Customer_Contact_Refined(Base, todictclass):
+    __tablename__ = 'customer_contact'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    mdm_customer_contact_id = Column(String(64), primary_key=True)
+    first_name = Column(String(128))
+    middle_name = Column(String(128))
+    last_name = Column(String(128))
+    full_name = Column(String(512))
+    date_of_birth = Column(Date)
+    login_email = Column(String(128))
+    auth_id = Column(String(64))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Customer_Contact_Mdm_Xref_Refined(Base, todictclass):
+    __tablename__ = 'customer_contact_mdm_xref'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    customer_contact_mdm_xref_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source_customer_id = Column(String(64))
+    mdm_customer_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.customer.mdm_customer_id'))
+    source_customer_contact_id = Column(String(64))
+    mdm_customer_contact_id = Column(String(64))
+    source_system_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.source_system.source_system_id'), nullable=False)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    customer = relationship('Customer_Refined')
+    source_system = relationship('Source_System_Refined')
+
+class Customer_Contact_Xref_Refined(Base, todictclass):
+    __tablename__ = 'customer_contact_xref'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    customer_contact_xref_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_customer_contact_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.customer_contact.mdm_customer_contact_id'), nullable=False)
+    mdm_customer_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.customer.mdm_customer_id'), nullable=False)
+    contact_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.contact_type.contact_type_id'))
+    status_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.status.status_id'), nullable=False)
+    status_valid_from = Column(DateTime)
+    status_valid_to = Column(DateTime)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    customer_contact = relationship('Customer_Contact_Refined')
+    customer = relationship('Customer_Refined')
+    contact_type = relationship('Contact_Type_Refined')
+    status = relationship('Status_Refined')
+
+class Customer_Digital_Profile_Refined(Base, todictclass):
+    __tablename__ = 'customer_digital_profile'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    customer_digital_profile_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_customer_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.customer.mdm_customer_id'), nullable=False)
+    digital_platform_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.digital_platform.digital_platform_id'), nullable=False)
+    digital_platform_value = Column(String(64))
+    is_primary = Column(Boolean)
+    is_email_valid = Column(Boolean)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    customer = relationship('Customer_Refined')
+    digital_platform = relationship('Digital_Platform_Refined')
+
+class Customer_Identifier_Refined(Base, todictclass):
+    __tablename__ = 'customer_identifier'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    customer_identifier_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_customer_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.customer.mdm_customer_id'), nullable=False)
+    identifier_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.identifier_type.identifier_type_id'), nullable=False)
+    identifier_value = Column(String(64))
+    registration_authority = Column(String(128))
+    valid_from = Column(DateTime)
+    valid_to = Column(DateTime)
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    customer = relationship('Customer_Refined')
+    identifier_type = relationship('Identifier_Type_Refined')
+
+class Customer_Phone_Refined(Base, todictclass):
+    __tablename__ = 'customer_phone'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    customer_phone_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    mdm_customer_id = Column(String(64), ForeignKey(f'{mdm_refined_db}.customer.mdm_customer_id'), nullable=False)
+    phone_type_id = Column(Integer, ForeignKey(f'{mdm_refined_db}.phone_type.phone_type_id'), nullable=False)
+    country_code = Column(String(5))
+    area_code = Column(String(10))
+    local_number = Column(String(15))
+    extension = Column(String(10))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+    customer = relationship('Customer_Refined')
+    phone_type = relationship('Phone_Type_Refined')
+
+class Digital_Platform_Refined(Base, todictclass):
+    __tablename__ = 'digital_platform'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    digital_platform_id = Column(Integer, primary_key=True, autoincrement=True)
+    digital_platform_type = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Identifier_Type_Refined(Base, todictclass):
+    __tablename__ = 'identifier_type'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    identifier_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    identifier_type = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Phone_Type_Refined(Base, todictclass):
+    __tablename__ = 'phone_type'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    phone_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    phone_type = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Physical_Address_Refined(Base, todictclass):
+    __tablename__ = 'physical_address'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    physical_address_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    address_line_1 = Column(Text)
+    address_line_2 = Column(Text)
+    city = Column(String(128))
+    county = Column(String(128))
+    state = Column(String(64))
+    country = Column(String(64))
+    zip = Column(String(6))
+    zip_plus_4 = Column(String(4))
+    latitude = Column(String(256))
+    longitude = Column(String(256))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Physical_Address_Type_Refined(Base, todictclass):
+    __tablename__ = 'physical_address_type'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    physical_address_type_id = Column(Integer, primary_key=True, autoincrement=True)
+    physical_address_type = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Source_System_Refined(Base, todictclass):
+    __tablename__ = 'source_system'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    source_system_id = Column(Integer, primary_key=True, autoincrement=True)
+    source_system = Column(String(128))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
+
+class Status_Refined(Base, todictclass):
+    __tablename__ = 'status'
+    __table_args__ = {'schema': mdm_refined_db}
+
+    status_id = Column(Integer, primary_key=True, autoincrement=True)
+    status = Column(String(16))
+    created_at = Column(DateTime, server_default=FetchedValue())
+    modified_at = Column(DateTime, server_default=FetchedValue(), server_onupdate=FetchedValue())
