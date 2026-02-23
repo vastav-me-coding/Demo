@@ -1,0 +1,1103 @@
+import os
+import logging
+import json
+import time
+import pandas as pd
+import asyncio
+from datetime import datetime
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import and_
+
+# --- DF imports ---
+from df_database_models.db_conn import get_rds_db_session, get_as400_db_session
+from df_database_models.models import (
+    Transaction_Coverage,
+    Transaction,
+    Coverage_Ref
+)
+from df_database_models.db_utils import (
+    generate_uuid,
+    convert_timestamps,
+    query_update_dict,
+    get_record,
+    multi_filter_get_record
+)
+from adf_pyutils.clm_wrapper import common_logger, generate_response_log_details
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# os.environ["AWS_REGION"] = "us-east-1"
+
+# os.environ['RDS_DB_NAME'] = "pnc_warehouse"
+# os.environ['RDS_REF_DB_NAME'] = "ref_data"
+# os.environ['RDS_RAW_DB_NAME'] = "mdm_raw"
+# os.environ['RDS_REFINED_DB_NAME'] = "mdm_refined"
+
+# os.environ['AS400_AFF_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-azsql-affpmsqc-credentials-secret-XJspXZ"
+# os.environ['AS400_KKINS_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-azsql-kkinsqc-credentials-secret-KThAVI"
+# os.environ['AUMINE_AFF_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-audbm-affods-credentials-secret-vclZk7"
+# os.environ['AUMINE_AUM_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-audbm-aumods-credentials-secret-tOkXG3"
+
+# os.environ['RDS_HOST'] = "affinity-ods2-develop.cluster-cj3qp6qspcpk.us-east-1.rds.amazonaws.com"
+# os.environ['RDS_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-ods2-ar4262-dv001-rds-master-credentials-169S6S"
+# os.environ['SQS_POLICY_UPDATE_URL'] = "https://6ekyb6mh5sxa3wpf3waq7ckvy40gckvy.lambda-url.us-east-1.on.aws/policy-update"
+# os.environ['SQS_PRODUCER_SECRET_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-tds-sqs-producer-v2-credentials-Cna5zK"
+
+# --- Global DB config ---
+pnc_db = os.environ['RDS_DB_NAME']
+ref_db = os.environ['RDS_REF_DB_NAME']
+
+# ------------------------------------------------------------
+# Logging helper
+# ------------------------------------------------------------
+async def log_msg(func, **kwargs):
+    await asyncio.to_thread(func, **kwargs)
+
+# ------------------------------------------------------------
+# Session creation
+# ------------------------------------------------------------
+def call_session_engine(source_system=None, database_name=None):
+    rds_secret_name = os.environ["RDS_SECRETS_MANAGER_ID"]
+    region_name = os.environ["AWS_REGION"]
+    rds_host_nm = os.environ['RDS_HOST']
+
+    if database_name:
+        if database_name == 'ref_data':
+            rds_db_nm = os.environ['RDS_REF_DB_NAME']
+        elif database_name == 'mdm_raw':
+            rds_db_nm = os.environ['RDS_RAW_DB_NAME']
+        elif database_name == 'mdm_refined':
+            rds_db_nm = os.environ['RDS_REFINED_DB_NAME']
+        else:
+            rds_db_nm = os.environ['RDS_DB_NAME']
+    else:
+        rds_db_nm = os.environ['RDS_DB_NAME']
+
+    if source_system and source_system.lower() == 'as400_affprd':
+        as400_secret_name = os.environ["AS400_AFF_SECRETS_MANAGER_ID"]
+        return get_as400_db_session(as400_secret_name, region_name)
+
+    elif source_system and source_system.lower() == 'as400_kkins':
+        as400_secret_name = os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+        return get_as400_db_session(as400_secret_name, region_name)
+
+    elif source_system and source_system.lower() == 'as400_attorney':
+        as400_secret_name = os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+        return get_as400_db_session(as400_secret_name, region_name)
+
+    return get_rds_db_session(rds_secret_name, region_name, rds_host_nm, rds_db_nm)
+
+
+# --- Global Sessions ---
+session = call_session_engine(database_name=pnc_db)
+session_ref = call_session_engine(database_name=ref_db)
+as400_engine_aff = call_session_engine(source_system='as400_affprd')
+as400_engine_kkins = call_session_engine(source_system='as400_kkins')
+as400_engine_attorney = call_session_engine(source_system='as400_attorney')
+
+# ------------------------------------------------------------
+# AS400 Lookup Function
+# ------------------------------------------------------------
+def lookup_as400(config=None, id=None):
+    """
+    Fetch a coverage carrier allocation record from AS400 based on allocation ID.
+    Adjust table/column names based on your AS400 schema.
+    """
+    source_system = config['source_system']
+    if source_system:
+        if(source_system.lower() == 'as400_affprd'):
+                df = pd.read_sql(f"""
+                with cte AS (SELECT 
+                    --CAST(NULL AS varchar(255)) AS df_transaction_coverage_id
+                    --,CAST(NULL AS varchar(255)) AS coverage_id
+                    --,CAST(NULL AS varchar(255)) AS df_transaction_id
+                    CAST(cv.CUSTOMER_NO AS varchar(50)) + '_' + CAST(cv.EFFECTIVE_DATE AS varchar(50)) AS source_transaction_id,
+                    cv.LIMIT_CODE AS coverage_code,
+                    tp.AGGREGATE_AMOUNT AS limits,
+                    CAST(NULL AS varchar(255)) AS deductable,
+                    tp.LIMIT_AMOUNT AS per_occurance,
+                    cv.TOTAL_PREMIUM AS premium,
+                    CAST(NULL AS varchar(255)) AS created_date
+                FROM ADGDTADV.NSOCVGP cv
+                INNER JOIN 
+                    ADGDTADV.HCPLMTP tp 
+                    ON tp.LIMIT_CODE = cv.LIMIT_CODE
+                )
+                select * from cte where source_transaction_id LIKE '%{id}%';
+                    """, con=as400_engine_aff)
+
+        elif(source_system.lower() == 'as400_kkins'):
+                df = pd.read_sql(f"""
+                
+                With Cte as (SELECT * FROM
+                (SELECT DISTINCT 
+                    tc.CV_COVERAGE_CODE AS coverage_code,
+                    CAST(p.PL_PRODUCT_CODE AS VARCHAR(50))
+                        + '-' + CAST(tc.PL_COMPANY AS VARCHAR(10))
+                        + '-' + CAST(tc.PL_PREFIX AS VARCHAR(10))
+                        + '-' + CAST(tc.PL_POL_NBR AS VARCHAR(20))
+                        + '-' + CAST(tc.PL_SUFFIX AS VARCHAR(10))
+                        + '-' + CAST(tc.PL_SEQ_NBR AS VARCHAR(10)) AS source_transaction_id,
+                    CAST(tc.PL_COMPANY AS VARCHAR(10))
+                        + CAST(tc.PL_PREFIX AS VARCHAR(10))
+                        + CAST(tc.PL_POL_NBR AS VARCHAR(20))
+                        + CAST(tc.PL_SUFFIX AS VARCHAR(10)) AS policy_number,
+                    tc.CV_LIMIT_2 AS limits,
+                    tc.CV_DED AS deductable,
+                    tc.CV_LIMIT_1 AS per_occurance,
+                    tc.CV_PREMIUM AS premium,
+                    CASE
+                        WHEN LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))) = '0' THEN NULL
+                        WHEN LEN(LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10))))) = 7 THEN
+                            CASE
+                                WHEN LEFT(LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),1) = '0' THEN
+                                    '19' + SUBSTRING(LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),2,2) +
+                                        SUBSTRING(LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),4,2) +
+                                        SUBSTRING(LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),6,2)
+                                WHEN LEFT(LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),1) = '1' THEN
+                                    '20' + SUBSTRING(LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),2,2) +
+                                        SUBSTRING(LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),4,2) +
+                                        SUBSTRING(LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),6,2)
+                                ELSE NULL
+                            END
+                        WHEN LEN(LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10))))) = 6 THEN
+                            CASE
+                                WHEN LEFT(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),7),1) = '0' THEN
+                                    '19' + SUBSTRING(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),7),2,2) +
+                                        SUBSTRING(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),7),4,2) +
+                                        SUBSTRING(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),7),6,2)
+                                WHEN LEFT(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),7),1) = '1' THEN
+                                    '20' + SUBSTRING(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),7),2,2) +
+                                        SUBSTRING(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),7),4,2) +
+                                        SUBSTRING(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EFF_DATE AS VARCHAR(10)))),7),6,2)
+                                ELSE NULL
+                            END
+                        ELSE NULL
+                    END AS policy_effective_date,
+                    -- Policy Expiration Date
+                    CASE
+                        WHEN LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))) = '0' THEN NULL
+                        WHEN LEN(LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10))))) = 7 THEN
+                            CASE
+                                WHEN LEFT(LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),1) = '0' THEN
+                                    '19' + SUBSTRING(LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),2,2) +
+                                        SUBSTRING(LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),4,2) +
+                                        SUBSTRING(LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),6,2)
+                                WHEN LEFT(LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),1) = '1' THEN
+                                    '20' + SUBSTRING(LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),2,2) +
+                                        SUBSTRING(LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),4,2) +
+                                        SUBSTRING(LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),6,2)
+                                ELSE NULL
+                            END
+                        WHEN LEN(LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10))))) = 6 THEN
+                            CASE
+                                WHEN LEFT(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),7),1) = '0' THEN
+                                    '19' + SUBSTRING(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),7),2,2) +
+                                        SUBSTRING(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),7),4,2) +
+                                        SUBSTRING(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),7),6,2)
+                                WHEN LEFT(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),7),1) = '1' THEN
+                                    '20' + SUBSTRING(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),7),2,2) +
+                                        SUBSTRING(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),7),4,2) +
+                                        SUBSTRING(RIGHT('0' + LTRIM(RTRIM(CAST(PL_POL_REC_EXP_DATE AS VARCHAR(10)))),7),6,2)
+                                ELSE NULL
+                            END
+                        ELSE NULL
+                    END AS policy_expiration_date,
+                    'AS400_KKINS' AS source_system
+                FROM [PLCYPROD].[AUZ002] p
+                INNER JOIN [PLCYPROD].[AUZ015] tc
+                    ON p.PL_COMPANY = tc.PL_COMPANY  
+                    AND p.PL_PREFIX  = tc.PL_PREFIX 
+                    AND p.PL_POL_NBR = tc.PL_POL_NBR 
+                    AND p.PL_SUFFIX  = tc.PL_SUFFIX) AS A
+                    WHERE A.policy_effective_date <= CONVERT(VARCHAR(8), DATEADD(YEAR, -8, GETDATE()), 112)
+                    AND A.policy_expiration_date > CONVERT(VARCHAR(8), DATEADD(YEAR, -8, GETDATE()), 112))
+                    select * from cte where policy_number = '{id}'
+
+                    """, con=as400_engine_kkins)
+    else:
+        df=None
+
+    if(len(df)>0):
+        return df.to_dict('records')[0]
+    else:
+        return None
+
+# ------------------------------------------------------------
+# Main Consumer Function
+# ------------------------------------------------------------
+def consume_lambda(config=None):
+    now = datetime.now()
+    start_timestamp = datetime.timestamp(now)
+    logger.info(f'Processing AS400 Transaction Coverage @ {now}')
+
+    try:
+        config_dicts = config if isinstance(config, list) else [json.loads(config)] if isinstance(config, str) else [config]
+
+        for conf in config_dicts:
+            cov_id = conf.get("source_policy_id")
+            source_system = conf.get("source_system").lower()
+
+            logger.info(f'Invoking handler for {source_system} transaction coverage {cov_id}')
+
+            if not cov_id:
+                continue
+
+            # --- Fetch record from AS400 ---
+            as400_datas = {'coverage_code': 'P-CGL   ', 'source_transaction_id': '315-6L-KKO-00000068546-00-9999', 'policy_number': '6LKKO0000006854600', 'limits': 0.0, 'deductable': 0.0, 'per_occurance': 1000000.0, 'premium': 146.0, 'policy_effective_date': '20170710', 'policy_expiration_date': '20180302', 'source_system': 'AS400_KKINS'} #lookup_as400(config=conf, id=cov_id)
+            if type(as400_datas) is not list:
+                as400_datas = [as400_datas]
+            for as400_data in as400_datas:
+
+                if not as400_data:
+                    logger.info(f'No AS400 record found for {cov_id}')
+                    continue
+
+                logger.info(f'AS400 Transaction Coverage Data Fetched')
+
+                # --- FK lookups ---
+                # Transaction lookup
+                txn_rec = multi_filter_get_record(
+                    session, model=Transaction,
+                    source_transaction_id=as400_data.get("source_transaction_id")
+                ).first()
+                if txn_rec:
+                    as400_data['df_transaction_id'] = txn_rec.df_transaction_id
+                else:
+
+                    logger.info(f'Transaction not found for Transaction_Coverage {cov_id}')
+                    continue
+
+                # Coverage lookup
+                coverage_rec = multi_filter_get_record(
+                    session_ref, model=Coverage_Ref,
+                    coverage_code=as400_data.get("coverage_code")
+                ).first()
+
+                if coverage_rec:
+                    as400_data['coverage_id'] = coverage_rec.coverage_id
+                else:
+
+                    logger.info(f'Inserted Coverage {as400_data["source_coverage_id"]}')
+                    continue
+
+                # --- Insert or Update Transaction Coverage ---
+                existing_cov = multi_filter_get_record(
+                    session, model=Transaction_Coverage,
+                    df_transaction_id=as400_data['df_transaction_id'],
+                    coverage_id=as400_data['coverage_id']
+                ).first()
+
+                if not existing_cov:
+                    df_transaction_coverage_id = generate_uuid(
+                        str(as400_data['df_transaction_id']), str(as400_data['coverage_id'])
+                    )
+
+                    as400_data["df_transaction_coverage_id"] = df_transaction_coverage_id
+                    existing_uuid = session.query(Transaction_Coverage).filter(
+                        Transaction_Coverage.df_transaction_coverage_id == df_transaction_coverage_id
+                    ).first()
+
+                    if not existing_uuid:
+                        as400_data["created_at"] = datetime.now()
+                        as400_data["modified_at"] = None
+
+                        session.add(Transaction_Coverage.from_dict(cls=Transaction_Coverage, d=as400_data))
+                        logger.info(f'Inserted Transaction_Coverage {cov_id}')
+                    else:
+
+                        logger.info(f"ransaction Coverage already exist with df_transaction_coverage_id {existing_uuid.df_transaction_coverage_id}")
+                else:
+
+                    as400_data["df_transaction_coverage_id"] = existing_cov.df_transaction_coverage_id
+                    as400_data["modified_at"] = datetime.now()
+                    session.query(Transaction_Coverage).filter(
+                        Transaction_Coverage.df_transaction_coverage_id == existing_cov.df_transaction_coverage_id
+                    ).update(query_update_dict(obj=Transaction_Coverage, dict=as400_data))
+                    logger.info(f'Updated Transaction_Coverage {cov_id}')
+
+                session.commit()
+
+        end_timestamp = datetime.timestamp(datetime.now())
+        return {'execution_time_sec': end_timestamp - start_timestamp}
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        logger.info(f'DB Error')
+        raise e
+
+# ------------------------------------------------------------
+# Lambda Handler
+# ------------------------------------------------------------
+
+def handle(event, context):
+    start_time = time.time()
+    failures = []
+
+    for record in event.get("Records", []):
+        logger.info(record)
+        payload = record.get("body")
+        try:
+
+            consume_lambda(config=payload)   # sync call is correct
+        except Exception:
+            message_id = record.get("messageId")
+            if message_id:
+                failures.append({"itemIdentifier": message_id})
+            else:
+                logger.error("Record missing messageId: %s", record, exc_info=True)
+
+    end_time = time.time()
+    logger.info("Lambda handle duration: %.3f seconds", end_time - start_time)
+
+    return {
+        "batchItemFailures": failures
+    }
+
+
+# Example Local Run
+# if __name__ == "__main__":
+#     handle({'Records': [{'body': '{"source_policy_id":"6LKKO0000006854600","source_system":"AS400_KKINS"}'}]}, None)
+
+
+
+
+
+
+
+
+
+
+
+
+Payment
+
+
+
+import os
+import json
+import time
+import logging
+import requests
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
+from df_database_models.db_conn import get_rds_db_session, get_as400_db_session
+from df_database_models.models import Payment,Payment_Type,Payment_Status,Invoice, Source_System
+from df_database_models.db_utils import  generate_uuid, convert_timestamps, generate_uuid, query_update_dict, get_record, call_sp, multi_filter_get_record
+from secrets_manager import get_secret
+from datetime import datetime
+import pandas as pd
+import asyncio
+from adf_pyutils.clm_wrapper import common_logger
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# os.environ["AWS_REGION"] = "us-east-1"
+
+# os.environ['RDS_DB_NAME'] = "pnc_warehouse"
+# os.environ['RDS_REF_DB_NAME'] = "ref_data"
+# os.environ['RDS_RAW_DB_NAME'] = "mdm_raw"
+# os.environ['RDS_REFINED_DB_NAME'] = "mdm_refined"
+
+# os.environ['AS400_AFF_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-azsql-affpmsqc-credentials-secret-XJspXZ"
+# os.environ['AS400_KKINS_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-azsql-kkinsqc-credentials-secret-KThAVI"
+# os.environ['AUMINE_AFF_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-audbm-affods-credentials-secret-vclZk7"
+# os.environ['AUMINE_AUM_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-audbm-aumods-credentials-secret-tOkXG3"
+
+# os.environ['RDS_HOST'] = "affinity-ods2-develop.cluster-cj3qp6qspcpk.us-east-1.rds.amazonaws.com"
+# os.environ['RDS_SECRETS_MANAGER_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-ods2-ar4262-dv001-rds-master-credentials-169S6S"
+# os.environ['SQS_POLICY_UPDATE_URL'] = "https://6ekyb6mh5sxa3wpf3waq7ckvy40gckvy.lambda-url.us-east-1.on.aws/policy-update"
+# os.environ['SQS_PRODUCER_SECRET_ID'] = "arn:aws:secretsmanager:us-east-1:968921834094:secret:affinity-tds-ar4262-dv001-tds-sqs-producer-v2-credentials-Cna5zK"
+
+# --- Env DB Configs ---
+pnc_db = os.environ['RDS_DB_NAME']
+ref_db = os.environ['RDS_REF_DB_NAME']
+mdm_raw_db = os.environ['RDS_RAW_DB_NAME']
+mdm_refined_db = os.environ['RDS_REFINED_DB_NAME']
+
+# --- Async Logger Wrapper ---
+async def log_msg(func, **kwargs):
+    await asyncio.to_thread(func, **kwargs)
+
+# --- Session/Engine Initializer ---
+def call_session_engine(source_system=None, database_name=None):
+
+    rds_secret_name = os.environ["RDS_SECRETS_MANAGER_ID"]
+    region_name = os.environ["AWS_REGION"]
+    rds_host_nm = os.environ['RDS_HOST']
+
+    if database_name == 'ref_data':
+        rds_db_nm = os.environ['RDS_REF_DB_NAME']
+    elif database_name == 'mdm_raw':
+        rds_db_nm = os.environ['RDS_RAW_DB_NAME']
+    elif database_name == 'mdm_refined':
+        rds_db_nm = os.environ['RDS_REFINED_DB_NAME']
+    else:
+        rds_db_nm = os.environ['RDS_DB_NAME']
+
+    if source_system and source_system.lower() == 'as400_affprd':
+        as400_secret_name = os.environ["AS400_AFF_SECRETS_MANAGER_ID"]
+        as400_engine = get_as400_db_session(as400_secret_name, region_name)
+        return as400_engine
+
+    elif source_system and source_system.lower() == 'as400_kkins':
+        as400_secret_name = os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+        as400_engine = get_as400_db_session(as400_secret_name, region_name)
+        return as400_engine
+
+    elif source_system and source_system.lower() == 'as400_attorney':
+        as400_secret_name = os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+        as400_engine = get_as400_db_session(as400_secret_name, region_name)
+        return as400_engine
+
+    if database_name:
+        session = get_rds_db_session(rds_secret_name, region_name, rds_host_nm, rds_db_nm)
+        return session
+
+
+# --- Global Sessions ---
+session = call_session_engine(database_name=pnc_db)
+as400_engine_aff = call_session_engine(source_system='AS400_AFFPRD')
+as400_engine_kkins = call_session_engine(source_system='as400_kkins')
+as400_engine_attorney = call_session_engine(source_system='as400_attorney')
+
+
+
+# lookup into as400 aff
+def lookup_as400(config=None, id=None):
+
+    source_system = config['source_system']
+    if source_system:
+        if(source_system.lower() == 'as400_affprd'):
+                df = pd.read_sql(f"""
+                    SELECT 
+                        ar.customer_number + '-' + ar.effective_date + '-' + CAST(ar.invoice_no AS varchar(10)) AS source_invoice_id,
+                        ar.customer_number + '-' + ar.effective_date + '-' + CAST(ar.invoice_no AS varchar(10)) AS source_payment_id,
+                        p.source_payment_type,
+                        CASE 
+                            WHEN p.source_payment_type = 'C' THEN 'Card'
+                            WHEN p.source_payment_type = 'M' THEN 'Check'
+                            WHEN p.source_payment_type = 'N' THEN 'Cash'
+                            WHEN p.source_payment_type = 'O' THEN 'ACH'
+                            WHEN p.source_payment_type = 'R' THEN 'Premium Financing'
+                            WHEN p.source_payment_type = '0' THEN 'P2P'
+                            WHEN p.source_payment_type = '1' THEN 'Digital Wallet'
+                            WHEN p.source_payment_type = '2' THEN 'Wire Transfer'
+                            WHEN ISNUMERIC(p.source_payment_type) = 1 AND CAST(p.source_payment_type AS int) BETWEEN 3 AND 9 THEN 'Other'
+                            ELSE 'Other' 
+                        END AS df_payment_type,
+                        -- ,NULL AS source_payment_status
+                        CASE WHEN ar.due_amount = 0 THEN ar.amount_paid ELSE NULL END AS payment_amount,
+                        p.payment_date,
+                        'AS400_AFFPRD' AS source_system
+                    FROM (
+                        SELECT  
+                            CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                            INVOICE_NO,
+                            MAX(
+                                CASE 
+                                    WHEN LEN(LTRIM(RTRIM(CASH_DATE_6))) = 1 THEN NULL
+                                    WHEN LEN(LTRIM(RTRIM(CASH_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(CASH_DATE_6)), 2) >= '75' THEN
+                                        '19' + SUBSTRING(LTRIM(RTRIM(CASH_DATE_6)), 4, 2) + '0' +
+                                        SUBSTRING(LTRIM(RTRIM(CASH_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(CASH_DATE_6)), 2, 2)
+                                    WHEN LEN(LTRIM(RTRIM(CASH_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(CASH_DATE_6)),2) >= '75' THEN
+                                        '19' + SUBSTRING(LTRIM(RTRIM(CASH_DATE_6)), 5, 2) +
+                                        SUBSTRING(LTRIM(RTRIM(CASH_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(CASH_DATE_6)), 3, 2)
+                                    WHEN LEN(LTRIM(RTRIM(CASH_DATE_6))) = 5 THEN
+                                        '20' + SUBSTRING(LTRIM(RTRIM(CASH_DATE_6)), 4, 2) + '0' +
+                                        SUBSTRING(LTRIM(RTRIM(CASH_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(CASH_DATE_6)), 2, 2)
+                                    ELSE
+                                        '20' + SUBSTRING(LTRIM(RTRIM(CASH_DATE_6)), 5, 2) +
+                                        SUBSTRING(LTRIM(RTRIM(CASH_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(CASH_DATE_6)), 3, 2)
+                                END
+                            ) AS payment_date,
+                            MAX(PAYMENT_TYPE) AS source_payment_type
+                        FROM ADGDTADV.U__PAYMNT p 
+                        GROUP BY CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3), INVOICE_NO
+                    ) AS p 
+                    INNER JOIN (
+                        SELECT 
+                            customer_number,
+                            invoice_no,
+                            CASE 
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 1 THEN NULL
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)),2) >= '75' THEN
+                                    '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' +
+                                    SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 6 AND RIGHT(LTRIM(RTRIM(EFFECTIVE_DATE_6)),2) >= '75' THEN
+                                    '19' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) +
+                                    SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2)
+                                WHEN LEN(LTRIM(RTRIM(EFFECTIVE_DATE_6))) = 5 THEN
+                                    '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 4, 2) + '0' +
+                                    SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 1) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 2, 2)
+                                ELSE
+                                    '20' + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 5, 2) +
+                                    SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 1, 2) + SUBSTRING(LTRIM(RTRIM(EFFECTIVE_DATE_6)), 3, 2)
+                            END AS effective_date,
+                            due_amount,
+                            amount_paid
+                    FROM (
+                            SELECT 
+                                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3) AS customer_number,
+                                INVOICE_NO,
+                                EFFECTIVE_DATE_6,
+                                SUM((PREMIUM+AMOUNT_ASSURED_PAID) - (CASH_ALLOCATED+RETURN_PREMIUM_CHG)) AS due_amount,
+                                SUM(PREMIUM) AS amount_paid
+                            FROM ADGDTADV.U__ARFILE
+                            GROUP BY 
+                                CAST(ASSURED_NO AS varchar(20)) + RIGHT('000' + CAST(ASSURED_SUB_NO AS varchar(10)), 3),
+                                INVOICE_NO,
+                                EFFECTIVE_DATE_6
+                        ) a
+                        WHERE due_amount = 0
+                    ) ar 
+                    ON ar.customer_number = p.customer_number AND p.invoice_no = ar.invoice_no
+                    WHERE ar.customer_number LIKE '{id}%';
+                    """, con=as400_engine_aff)
+
+        elif(source_system.lower() == 'as400_kkins'):
+                df = pd.read_sql(f"""
+                    with  cte as (SELECT 
+                        inv.source_invoice_id AS source_payment_id,
+                        inv.source_invoice_id,
+                        CASE 
+                            WHEN inv.invoice_amount = (ABS(COALESCE(pay.payment_amount, 0)) + ABS(inv.total_amount_due)) 
+                                THEN 'Not Applied'
+                            WHEN inv.invoice_amount <> (ABS(COALESCE(pay.payment_amount, 0)) + ABS(inv.total_amount_due)) 
+                                THEN 'Applied'
+                            ELSE NULL 
+                        END AS source_payment_status,
+                        pay.payment_amount,
+                        pay.payment_date,
+                        'AS400_KKINS' as source_system
+                    FROM
+                    (
+                        SELECT DISTINCT 
+                            f0.QBDOC AS source_invoice_id,
+                            f0.QBDOC AS invoice_number,
+                            f0.QB$CLB AS club_number,
+                            f0.QB$RSK AS risk_number,
+                            (CAST(f0.QB$PCD AS VARCHAR(100)) + '-' 
+                            + CAST(f0.QB$CMP AS VARCHAR(100)) + '-' 
+                            + CAST(f0.QB$PFX AS VARCHAR(100)) + '-' 
+                            + CAST(f0.QB$NBR AS VARCHAR(100)) + '-' 
+                            + CAST(f0.QB$SFX AS VARCHAR(100)) + '-' 
+                            + CAST(f0.QB$END AS VARCHAR(100))) AS transaction_id,
+                            /* QBDIVJ -> order_date (CYYDDD Julian to date) */
+                            DATEADD(
+                                DAY,
+                                CAST(
+                                    RIGHT('0000000', 7 - LEN(CAST(f0.QBDIVJ AS VARCHAR(7)))) 
+                                    + CAST(f0.QBDIVJ AS VARCHAR(7)) AS INT
+                                ) % 1000 - 1,
+                                DATEFROMPARTS(
+                                    1900
+                                    + (
+                                        CAST(
+                                            SUBSTRING(
+                                                RIGHT('0000000', 7 - LEN(CAST(f0.QBDIVJ AS VARCHAR(7))))
+                                                + CAST(f0.QBDIVJ AS VARCHAR(7)), 
+                                                1, 1
+                                            ) AS INT
+                                        ) * 100
+                                        + CAST(
+                                            SUBSTRING(
+                                                RIGHT('0000000', 7 - LEN(CAST(f0.QBDIVJ AS VARCHAR(7))))
+                                                + CAST(f0.QBDIVJ AS VARCHAR(7)), 
+                                                2, 2
+                                            ) AS INT
+                                        )
+                                    ),
+                                    1,
+                                    1
+                                )
+                            ) AS order_date,
+                            SUM(f11.RPAG) AS invoice_amount,
+                            ABS(SUM(f11.RPAAP)) AS total_amount_due,
+                            /* RPDDJ -> due_date */
+                            DATEADD(
+                                DAY,
+                                CAST(
+                                    RIGHT('0000000', 7 - LEN(CAST(f11.RPDDJ AS VARCHAR(7)))) 
+                                    + CAST(f11.RPDDJ AS VARCHAR(7)) AS INT
+                                ) % 1000 - 1,
+                                DATEFROMPARTS(
+                                    1900
+                                    + (
+                                        CAST(
+                                            SUBSTRING(
+                                                RIGHT('0000000', 7 - LEN(CAST(f11.RPDDJ AS VARCHAR(7))))
+                                                + CAST(f11.RPDDJ AS VARCHAR(7)), 
+                                                1, 1
+                                            ) AS INT
+                                        ) * 100
+                                        + CAST(
+                                            SUBSTRING(
+                                                RIGHT('0000000', 7 - LEN(CAST(f11.RPDDJ AS VARCHAR(7))))
+                                                + CAST(f11.RPDDJ AS VARCHAR(7)), 
+                                                2, 2
+                                            ) AS INT
+                                        )
+                                    ),
+                                    1,
+                                    1
+                                )
+                            ) AS due_date
+                        FROM SLEDTA.F55300 AS f0
+                        JOIN SLEDTA.F0311  AS f11
+                            ON f11.RPDOC = f0.QBDOC
+                        WHERE f11.RPDCT = 'RI'  
+                        AND (f11.RPDCTM IS NULL OR LTRIM(RTRIM(f11.RPDCTM)) = '')
+                        AND f11.RPSFX <> f11.RPDOC
+                        GROUP BY
+                            f0.QB$PCD, f0.QB$CMP, f0.QB$PFX, f0.QB$NBR, f0.QB$SFX, f0.QB$END,
+                            f0.QBDOC,
+                            f0.QB$CLB,
+                            f0.QB$RSK,
+                            f0.QBDIVJ,
+                            f11.RPDDJ
+                    ) AS inv
+                    INNER JOIN
+                    (
+                        SELECT 
+                            f0.QBDOC AS source_invoice_id,
+                            f0.QBDOC AS invoice_number,
+                            (CAST(f0.QB$PCD AS VARCHAR(100)) + '-' 
+                            + CAST(f0.QB$CMP AS VARCHAR(100)) + '-' 
+                            + CAST(f0.QB$PFX AS VARCHAR(100)) + '-' 
+                            + CAST(f0.QB$NBR AS VARCHAR(100)) + '-' 
+                            + CAST(f0.QB$SFX AS VARCHAR(100)) + '-' 
+                            + CAST(f0.QB$END AS VARCHAR(100))) AS transaction_id,
+                            ABS(SUM(f11.RPAG)) AS payment_amount,
+                            /* RPDMTJ -> payment_date */
+                            DATEADD(
+                                DAY,
+                                CAST(
+                                    RIGHT('0000000', 7 - LEN(CAST(f11.RPDMTJ AS VARCHAR(7)))) 
+                                    + CAST(f11.RPDMTJ AS VARCHAR(7)) AS INT
+                                ) % 1000 - 1,
+                                DATEFROMPARTS(
+                                    1900
+                                    + (
+                                        CAST(
+                                            SUBSTRING(
+                                                RIGHT('0000000', 7 - LEN(CAST(f11.RPDMTJ AS VARCHAR(7))))
+                                                + CAST(f11.RPDMTJ AS VARCHAR(7)), 
+                                                1, 1
+                                            ) AS INT
+                                        ) * 100
+                                        + CAST(
+                                            SUBSTRING(
+                                                RIGHT('0000000', 7 - LEN(CAST(f11.RPDMTJ AS VARCHAR(7))))
+                                                + CAST(f11.RPDMTJ AS VARCHAR(7)), 
+                                                2, 2
+                                            ) AS INT
+                                        )
+                                    ),
+                                    1,
+                                    1
+                                )
+                            ) AS payment_date
+                        FROM SLEDTA.F55300 AS f0
+                        JOIN SLEDTA.F0311  AS f11
+                            ON f11.RPDOC = f0.QBDOC
+                        WHERE f11.RPDCT = 'RI'  
+                        AND LTRIM(RTRIM(f11.RPDCTM)) <> ''
+                        AND f11.RPSFX <> f11.RPDOC
+                        GROUP BY
+                            f0.QB$PCD, f0.QB$CMP, f0.QB$PFX, f0.QB$NBR, f0.QB$SFX, f0.QB$END,
+                            f0.QBDOC,
+                            f11.RPDMTJ
+                    ) AS pay 
+                        ON inv.invoice_number = pay.invoice_number
+                    WHERE pay.payment_amount IS NOT NULL)
+                    select * from cte where source_payment_id = '{id}';
+                    """, con=as400_engine_kkins)
+    else:
+        df=None
+
+    if(len(df)>0):
+        return df.to_dict('records')
+    else:
+        return None
+
+def consume_lambda(config=None):
+    logger.info(f'consume lambda function invoking')
+    now = datetime.now()
+    start_timestamp = datetime.timestamp(now)
+    logger.info(f'Processing to DB @ {now} | {datetime.timestamp(now)}')
+
+    try:
+        logger.info(f'Config')
+        config_dicts = config if type(config) is dict else json.loads(str(config))
+        if type(config_dicts) == list:
+            pass
+        else:
+            config_dicts = [config_dicts] # Ensure config_dicts is a list
+        for config_dict in config_dicts:
+
+            if "source_customer_id" in config_dict and config_dict.get("source_customer_id") is not None:
+                id = config_dict.get("source_customer_id")
+            elif "source_payment_id" in config_dict and config_dict.get("source_payment_id") is not None:
+                id = int(config_dict.get("source_payment_id"))
+
+            source_system = config_dict['source_system'].lower()
+            if(id):
+
+                payment_dicts = lookup_as400(config_dict, id) #define dict for lookup data
+                if type(payment_dicts) is not list:
+                    payment_dicts = [payment_dicts]
+                for payment_dict in payment_dicts:
+
+                    if(payment_dict):
+                        print('&&&&')
+                        print(payment_dict)
+                        print('&&&&')
+                        logger.info(f'Initial {source_system} payment dict:')
+
+                        #Fetch Source SyStem Id from Data Foundation
+                        source_system = payment_dict.get("source_system")
+                        source_system_query = multi_filter_get_record(session, model=Source_System, source_system=source_system)
+                        source_system_record = source_system_query.first() if source_system_query else None
+                        if source_system_record:
+                            payment_dict['df_source_system_id'] = source_system_record.df_source_system_id
+                        else:
+                            print('1')
+                            logger.info(f'source system id does not exist in Data Foundation for payload id {id}')
+                            continue
+
+                        #Fetch Payment Type Id from Data Foundation
+                        if 'df_payment_type' not in payment_dict:
+                            payment_type = 'Other'
+                        else:
+                            payment_type = payment_dict.get("df_payment_type")
+
+                        payment_type_query = multi_filter_get_record(session,model=Payment_Type, payment_type=payment_type)
+                        payment_type_record = payment_type_query.first() if payment_type_query else None
+                        if payment_type_record:
+                            payment_dict['df_payment_type_id'] = payment_type_record.df_payment_type_id
+                        else:
+                            print('2')
+                            logger.info(f'df_payment_type_id does not exist in Data Foundation for payload id {id}')
+                            continue
+
+                        #Fetch Payment status Id from Data Foundation
+                        payment_status = 'Other'
+                        payment_status_query = multi_filter_get_record(session,model=Payment_Status, payment_status=payment_status)
+                        payment_status_record = payment_status_query.first() if payment_status_query else None
+                        if payment_status_record:
+                            payment_dict['df_payment_status_id'] = payment_status_record.df_payment_status_id
+                        else:
+                            print('3')
+                            logger.info(f'df_payment_status_id does not exist in Data Foundation for payload id {id}')
+                            continue
+
+                        #Fetch invoice Id from Data Foundation
+                        invoice = payment_dict.get("source_invoice_id")
+
+                        invoice_query = multi_filter_get_record(session,model=Invoice, source_invoice_id=str(int(invoice)))
+  
+                        invoice_record = invoice_query.first() if invoice_query else None
+                        if invoice_record:
+                            payment_dict['df_invoice_id'] = invoice_record.df_invoice_id
+                        else:
+                            print('4')
+                            logger.info(f'df_invoice_id does not exist in Data Foundation for payload id {id}')
+                            continue
+
+                        df_payment_id = payment_dict.get("df_payment_id") 
+                        df_source_system_id = payment_dict.get("df_source_system_id") 
+
+                        #Fetch payment  data from Data Foundation
+                        payment_query = multi_filter_get_record(session, model=Payment, df_payment_id=df_payment_id, df_source_system_id=df_source_system_id)
+                        payment_record = payment_query.first() if payment_query else None
+
+                        if (payment_record is None):
+                            df_payment_id = generate_uuid(
+                                str(payment_dict["source_payment_id"])
+                            )
+                            payment_dict["df_payment_id"] = df_payment_id
+                            logger.info(f'Payment does not exist in Data Foundation')
+                            logger.info(f'Payment dict Insert')
+                            payment_dict["created_at"] =  datetime.now()
+                            payment_dict["modified_at"] = None
+                            session.add(Payment.from_dict(cls=Payment, d=payment_dict))
+                            session.commit()
+                            logger.info(f'Inserted to DB @ {now} | {datetime.timestamp(now)}')
+                        else:
+                            logger.info(f'Payment exists in Data Foundation')
+                            
+                            payment_dict["modified_at"] = datetime.now()
+                            q = session.query(Payment).filter(
+                                Payment.df_payment_id == payment_record.df_payment_id, Payment.df_source_system_id == payment_record.df_source_system_id
+                            )
+                            logger.info(f'Payment dict Update')
+                            q.update(
+                                query_update_dict(
+                                    obj=Payment,
+                                    dict=payment_dict
+                                )
+                            )
+                            session.commit()
+                            logger.info(f'Updated in DB @ {now} | {datetime.timestamp(now)}')
+                            
+
+            else:
+                    error_log = {
+                        "df_payment_id" : id,
+                        "error_message" : "No record found after lookup" 
+                    }
+                    logger.info(f'No record found after lookup')
+        now = datetime.now()
+        end_timestamp = datetime.timestamp(now)
+        logger.info(f'execution_time: {end_timestamp} - {start_timestamp}')
+    except SQLAlchemyError as e:
+        logger.info(f'Error')
+        session.rollback()
+        raise e
+
+
+def handle(event, context):
+    start_time = time.time()
+    failures = []
+
+    for record in event.get("Records", []):
+        logger.info(record)
+        payload = record.get("body")
+        try:
+
+            consume_lambda(config=payload)   # sync call is correct
+        except Exception:
+            message_id = record.get("messageId")
+            if message_id:
+                failures.append({"itemIdentifier": message_id})
+            else:
+                logger.error("Record missing messageId: %s", record, exc_info=True)
+
+    end_time = time.time()
+    logger.info("Lambda handle duration: %.3f seconds", end_time - start_time)
+
+    return {
+        "batchItemFailures": failures
+    }
+
+
+# if __name__ == '__main__':
+#     handle({'Records': [{'body': '{"source_payment_id":"429635", "source_system" : "AS400_KKINS"}'}]}, None)
+ 
+
+
+coverage
+
+
+
+import os
+import json
+import time, logging
+import requests
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
+from df_database_models.db_conn import get_rds_db_session, get_as400_db_session
+from df_database_models.models import Coverage_Ref, Source_System
+from df_database_models.db_utils import  generate_uuid, convert_timestamps, generate_uuid, query_update_dict, get_record, multi_filter_get_record, push_msg_to_sqs, call_sp
+from secrets_manager import get_secret
+from datetime import datetime
+import pandas as pd
+import asyncio
+from adf_pyutils.clm_wrapper import common_logger
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+pnc_db = os.environ['RDS_DB_NAME']
+ref_db = os.environ['RDS_REF_DB_NAME']
+
+async def log_msg(func,**kwargs):
+    await asyncio.to_thread(func,**kwargs)
+def call_session_engine(source_system=None, database_name=None):
+    rds_secret_name = os.environ["RDS_SECRETS_MANAGER_ID"]
+    region_name = os.environ["AWS_REGION"]
+    rds_host_nm = os.environ['RDS_HOST']
+
+    if database_name:
+        if database_name == 'ref_data':
+            rds_db_nm = os.environ['RDS_REF_DB_NAME']
+        elif database_name == 'mdm_raw':
+            rds_db_nm = os.environ['RDS_RAW_DB_NAME']
+        elif database_name == 'mdm_refined':
+            rds_db_nm = os.environ['RDS_REFINED_DB_NAME']
+        else:
+            rds_db_nm = os.environ['RDS_DB_NAME']
+    else:
+        rds_db_nm = os.environ['RDS_DB_NAME']
+
+    if source_system and source_system.lower() == 'as400_affprd':
+        as400_secret_name = os.environ["AS400_AFF_SECRETS_MANAGER_ID"]
+        return get_as400_db_session(as400_secret_name, region_name)
+
+    elif source_system and source_system.lower() == 'as400_kkins':
+        as400_secret_name = os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+        return get_as400_db_session(as400_secret_name, region_name)
+
+    elif source_system and source_system.lower() == 'as400_attorney':
+        as400_secret_name = os.environ["AS400_KKINS_SECRETS_MANAGER_ID"]
+        return get_as400_db_session(as400_secret_name, region_name)
+
+    return get_rds_db_session(rds_secret_name, region_name, rds_host_nm, rds_db_nm)
+
+
+# --- Global Sessions ---
+session = call_session_engine(database_name=pnc_db)
+session_ref = call_session_engine(database_name=ref_db)
+as400_engine_aff = call_session_engine(source_system='as400_affprd')
+as400_engine_kkins = call_session_engine(source_system='as400_kkins')
+as400_engine_attorney = call_session_engine(source_system='as400_attorney')
+
+# lookup into as400 aff
+def lookup_as400(config=None, id=None):
+
+    source_system = config['source_system']
+    if source_system:
+        if(source_system.lower() == 'as400_affprd'):
+                df = pd.read_sql(f"""                                      
+                        SELECT DISTINCT
+                        CAST(NULL AS varchar(255)) AS df_coverage_id
+                        ,a.LIMIT_DESCRIPTION AS coverage_name
+                        ,b.LMTCOD AS coverage_code
+                        ,CAST(NULL AS varchar(255)) AS naics_code
+                        FROM
+                        ADGDTAPR.HCPLMTP a
+                        INNER JOIN
+                        ADGDTAPR.NSOCVGP b ON b.LMTCOD = a.LMTCOD
+                        WHERE b.LMTCOD = {id};
+                    """, con=as400_engine_aff)
+        elif(source_system.lower() == 'as400_kkins'):
+                df = pd.read_sql(f"""
+                      SELECT DISTINCT 
+                        CV_COVERAGE_CODE AS coverage_code,
+                        CV_WRITTEN_DESC AS coverage_name,
+                        CAST(NULL AS varchar(255)) as naics_code,
+                        'AS400_KKINS' AS source_system
+                        FROM PLCYADMIN.AEZ019
+                        WHERE CV_COVERAGE_CODE = '{id}';
+                    """, con=as400_engine_kkins)
+    else:
+        df=None
+
+    if(len(df)>0):
+        return df.to_dict('records')[0]
+    else:
+        return None
+
+async def consume_lambda(config=None):
+    logger.info(f'consume lambda function invoking')
+    now = datetime.now()
+    start_timestamp = datetime.timestamp(now)
+    logger.info(f'Processing to DB @ {now} | {datetime.timestamp(now)}')
+
+    try:
+        logger.info(f'Config {config}')
+        config_dicts = config if type(config) is dict else json.loads(str(config))
+        if type(config_dicts) == list:
+            pass
+        else:
+            config_dicts = [config_dicts]
+        for config_dict in config_dicts:
+
+            # id = config_dict['coverage_code'] # Get the coverage from config data 
+            if "coverage_code" in config_dict and config_dict.get("coverage_code") is not None:
+                id = config_dict.get("coverage_code")
+            # elif "source_policy_id" in config_dict and config_dict.get("source_policy_id") is not None:
+            #     id = int(config_dict.get("source_policy_id"))
+
+            source_system = config_dict['source_system'].lower()
+            if(id):
+
+                coverage_dict = lookup_as400(config_dict, id) #define dict for lookup data
+                
+                if(coverage_dict):
+                    logger.info(f'Initial {source_system} coverage Summary dict:{coverage_dict}')
+
+                    #Assign a variable to coverage id from Dictionary Object
+                    coverage_code = coverage_dict.get("coverage_code")
+                    coverage_name = coverage_dict.get("coverage_name")
+
+                    cvg_record = multi_filter_get_record(
+                    session_ref,
+                    model=Coverage_Ref,
+                    coverage_code=coverage_code,
+                    coverage_name=coverage_name
+                    )
+                    existing_cvg = cvg_record.first() if cvg_record else None
+
+                    if not existing_cvg:
+                        df_coverage_id = generate_uuid(
+                        str(coverage_code) + str(coverage_name)
+                        )
+
+                        coverage_dict['coverage_id'] = df_coverage_id
+                        existing_uuid = session.query(Coverage_Ref).filter(
+                            Coverage_Ref.coverage_id == df_coverage_id
+                        ).first()
+
+                        if not existing_uuid:
+                            session.add(Coverage_Ref.from_dict(cls=Coverage_Ref, d=coverage_dict))
+                            session.commit()
+                            logger.info(f'Inserted df_coverage_id {df_coverage_id}')
+                        else:
+                            logger.info(
+                                f" Coverage already exist with df_coverage_id {existing_uuid.df_coverage_id}"
+                            )
+                    else:
+                        coverage_dict['df_transaction_id'] = existing_cvg.df_coverage_id
+                        cvg_record.update(query_update_dict(obj=Coverage_Ref, dict=coverage_dict))
+                        logger.info(f'Updated coverage {df_coverage_id}')
+                    
+                        logger.info(f'self coverage - {cvg_record}')
+                        logger.info(f'Changed {source_system} as400 coverage dict:coverage_dict')
+            else:
+                    error_log = {
+                        "df_coverage_id" : id,
+                        "error_message" : "No record found after lookup" 
+                    }
+                    logger.info(f'No record found after lookup')
+        now = datetime.now()
+        end_timestamp = datetime.timestamp(now)
+        logger.info(f'execution_time: {end_timestamp} - {start_timestamp}')
+    except SQLAlchemyError as e:
+        logger.info(f'Error')
+        session.rollback()
+        raise e
+
+def handle(event, context):
+    start_time = time.time()
+    failures = []
+
+    for record in event.get("Records", []):
+        logger.info(record)
+        payload = record.get("body")
+        try:
+
+            consume_lambda(config=payload)   # sync call is correct
+        except Exception:
+            message_id = record.get("messageId")
+            if message_id:
+                failures.append({"itemIdentifier": message_id})
+            else:
+                logger.error("Record missing messageId: %s", record, exc_info=True)
+
+    end_time = time.time()
+    logger.info("Lambda handle duration: %.3f seconds", end_time - start_time)
+
+    return {
+        "batchItemFailures": failures
+    }
+
+
+
+
+# if __name__ == '__main__':
+#     handle({'Records': [{'body': '{"coverage_code":"P-CGL", "source_system":"AS400_KKINS"}'}]}, None)
+ 
