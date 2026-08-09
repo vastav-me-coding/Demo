@@ -1,0 +1,24 @@
+Entity name,Lambda name
+MDM Raw Agency,df-sqs-aff-kkins-mdm-raw-agency
+MDM Raw Agency Contact,df-sqs-aff-kkins-mdm-raw-ac
+MDM Raw Customer,df-sqs-aff-kkins-mdm-raw-customer
+MDM Raw Customer Contact,df-sqs-aff-kkins-mdm-raw-cc
+Address,df-sqs-as400-aff-kkins-address
+Agency,df-sqs-as400-aff-kkins-agency
+Agency Contact,df-sqs-as400-aff-kkins-ac
+Carrier,df-sqs-as400-aff-kkins-carrier
+Coverage Carrier Allocation,df-sqs-as400-aff-kkins-cca
+Coverage,df-sqs-as400-aff-kkins-coverage
+Customer,df-sqs-as400-aff-kkins-customer
+Customer Contact,df-sqs-as400-aff-kkins-cc
+Invoice,df-sqs-as400-aff-kkins-invoice
+Lineitem,df-sqs-as400-aff-kkins-lineitem
+Payment,df-sqs-as400-aff-kkins-payment
+PaymentPlan,df-sqs-as400-aff-kkins-paymentplan
+Policy,df-sqs-as400-aff-kkins-policy
+Policy Location,df-sqs-as400-aff-kkins-policylocation
+Policy Number Version,df-sqs-as400-aff-kkins-pnv
+Quote,df-sqs-as400-aff-kkins-quote
+Transaction,df-sqs-as400-aff-kkins-transaction
+Transaction Coverage,df-sqs-as400-aff-kkins-tc
+Underwriter,df-sqs-as400-aff-kkins-underwriter
